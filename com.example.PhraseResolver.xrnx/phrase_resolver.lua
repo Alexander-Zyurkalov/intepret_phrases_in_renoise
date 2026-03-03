@@ -128,6 +128,50 @@ function M._generate_line_sequence(phrase, num_lines)
     return indices
 end
 
+--- Check if a note column table contains any actual data.
+function M.is_note_column_empty(col)
+    if not col then
+        return true
+    end
+    local nv = col.note_value
+    if nv ~= nil and nv ~= M.NOTE_EMPTY then
+        return false
+    end
+    if col.instrument_value and col.instrument_value ~= M.EMPTY_INSTRUMENT then
+        return false
+    end
+    if col.volume_value and col.volume_value ~= M.EMPTY_VOLUME then
+        return false
+    end
+    if col.panning_value and col.panning_value ~= M.EMPTY_PANNING then
+        return false
+    end
+    if col.delay_value and col.delay_value ~= M.EMPTY_DELAY then
+        return false
+    end
+    if col.effect_number_value and col.effect_number_value ~= M.EMPTY_EFFECT_NUMBER then
+        return false
+    end
+    if col.effect_amount_value and col.effect_amount_value ~= M.EMPTY_EFFECT_AMOUNT then
+        return false
+    end
+    return true
+end
+
+--- Check if an effect column table contains any actual data.
+function M.is_effect_column_empty(col)
+    if not col then
+        return true
+    end
+    if col.number_value and col.number_value ~= M.EMPTY_EFFECT_NUMBER then
+        return false
+    end
+    if col.amount_value and col.amount_value ~= M.EMPTY_EFFECT_AMOUNT then
+        return false
+    end
+    return true
+end
+
 ---------------------------------------------------------------------------
 -- Internal: transpose a single note value
 ---------------------------------------------------------------------------
@@ -493,28 +537,32 @@ function M.resolved_to_pattern_lines(resolved, song_lpb)
             for _, p in ipairs(group) do
                 local rline = p.resolved_line
 
-                -- Append each note column from this resolved line
+                -- Append only non-empty note columns
                 for _, col in ipairs(rline.note_columns or {}) do
-                    local nc = {
-                        note_value = col.note_value,
-                        instrument_value = col.instrument_value,
-                        volume_value = col.volume_value,
-                        panning_value = col.panning_value,
-                        delay_value = p.delay,
-                        effect_number_value = col.effect_number_value,
-                        effect_amount_value = col.effect_amount_value,
-                    }
-                    note_cols[#note_cols + 1] = nc
+                    if not M.is_note_column_empty(col) then
+                        local nc = {
+                            note_value = col.note_value,
+                            instrument_value = col.instrument_value,
+                            volume_value = col.volume_value,
+                            panning_value = col.panning_value,
+                            delay_value = p.delay,
+                            effect_number_value = col.effect_number_value,
+                            effect_amount_value = col.effect_amount_value,
+                        }
+                        note_cols[#note_cols + 1] = nc
+                    end
                 end
 
-                -- Append effect columns from this resolved line
+                -- Append only non-empty effect columns
                 for _, fc in ipairs(rline.effect_columns or {}) do
-                    fx_cols[#fx_cols + 1] = {
-                        number_value = fc.number_value,
-                        number_string = fc.number_string,
-                        amount_value = fc.amount_value,
-                        amount_string = fc.amount_string,
-                    }
+                    if not M.is_effect_column_empty(fc) then
+                        fx_cols[#fx_cols + 1] = {
+                            number_value = fc.number_value,
+                            number_string = fc.number_string,
+                            amount_value = fc.amount_value,
+                            amount_string = fc.amount_string,
+                        }
+                    end
                 end
             end
 

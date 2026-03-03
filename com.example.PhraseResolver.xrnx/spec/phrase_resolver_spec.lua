@@ -743,6 +743,36 @@ describe("resolved_to_pattern_lines", function()
         local lines = PR.resolved_to_pattern_lines(resolved)
         assert.are.equal(2, #lines)
     end)
+
+    it("excludes empty note columns", function()
+        local phrase = make_phrase({{48}}, { lpb = 4 })
+        -- Add a second note column that is fully empty
+        phrase.lines[1].note_columns[2] = {
+            note_value          = PR.NOTE_EMPTY,
+            instrument_value    = PR.EMPTY_INSTRUMENT,
+            volume_value        = PR.EMPTY_VOLUME,
+            panning_value       = PR.EMPTY_PANNING,
+            delay_value         = PR.EMPTY_DELAY,
+            effect_number_value = PR.EMPTY_EFFECT_NUMBER,
+            effect_amount_value = PR.EMPTY_EFFECT_AMOUNT,
+        }
+        local resolved = PR.resolve_phrase(48, phrase)
+        local lines = PR.resolved_to_pattern_lines(resolved, 4)
+        assert.are.equal(1, #lines[1].note_columns)
+        assert.are.equal(48, lines[1].note_columns[1].note_value)
+    end)
+
+    it("excludes empty effect columns", function()
+        local phrase = make_phrase({{48}}, { lpb = 4 })
+        phrase.lines[1].effect_columns = {
+            { number_value = 0, amount_value = 0 },  -- empty
+            { number_value = 10, amount_value = 0x50 },  -- has data
+        }
+        local resolved = PR.resolve_phrase(48, phrase)
+        local lines = PR.resolved_to_pattern_lines(resolved, 4)
+        assert.are.equal(1, #lines[1].effect_columns)
+        assert.are.equal(10, lines[1].effect_columns[1].number_value)
+    end)
 end)
 
 ---------------------------------------------------------------------------

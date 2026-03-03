@@ -93,6 +93,7 @@ local function intepret_line(pos)
 
     for col_i, col in ipairs(pline.note_columns) do
       local nc = target_line:note_column(col_i)
+
       nc.note_value          = col.note_value          or 121
       nc.instrument_value    = col.instrument_value    or 255
       nc.volume_value        = col.volume_value        or 255
