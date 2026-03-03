@@ -340,19 +340,23 @@ end
 -- High-level: resolve a pattern line + instrument → note sequence
 ---------------------------------------------------------------------------
 
---- Given a pattern line and instrument, resolve the triggered phrase.
+--- Given a pattern line and the song's instruments array, resolve the
+--- triggered phrase.
+---
+--- The instrument is determined from the note column's instrument_value.
+--- Renoise uses 0-based instrument values in patterns but 1-based indexing
+--- in song.instruments, so we look up instruments[instrument_value + 1].
 ---
 --- Supports both Zxx (program mode) and keymap-based phrase selection.
---- When a Zxx command is present, it takes priority. If Z00 is found
---- (phrase_index=1 after +1 mapping), it means "no phrase".
+--- When a Zxx command is present, it takes priority.
 --- If Z7F (127) is found, it falls back to keymap mode.
 ---
 --- @param  pattern_line  table    PatternLine-shaped table
---- @param  instrument    table    { phrases = { [1]=phrase, ... } }
+--- @param  instruments   table    Array of instrument tables (1-based, like song.instruments)
 --- @param  options       table?   Optional: { col_index=1, song_lpb=4, num_lines=nil }
 --- @return table|nil, string?     Resolved lines, or nil + error message
 
-function M.resolve_pattern_phrase(pattern_line, instrument, options)
+function M.resolve_pattern_phrase(pattern_line, instruments, options)
     options = options or {}
     local col_index = options.col_index or 1
 
@@ -364,20 +368,27 @@ function M.resolve_pattern_phrase(pattern_line, instrument, options)
         return nil, "No valid trigger note"
     end
 
-    if not instrument or not instrument.phrases then
+    if not parsed.instrument_value or
+            parsed.instrument_value == M.EMPTY_INSTRUMENT then
+        return nil, "No instrument specified"
+    end
+
+    -- Renoise: pattern instrument_value is 0-based, instruments[] is 1-based
+    local instrument = instruments[parsed.instrument_value + 1]
+
+    if not instrument then
+        return nil, "Instrument " .. parsed.instrument_value .. " not found"
+    end
+
+    if not instrument.phrases or #instrument.phrases == 0 then
         return nil, "Instrument has no phrases"
     end
 
     local phrase
 
     if parsed.phrase_index then
-        -- Zxx was found
-        -- Z00 (amount=0 → index=1) in Renoise means "no phrase" when
-        -- phrase_playback_mode is "Program". But here we treat it as phrase 1
-        -- since the caller explicitly asked to resolve.
         -- Z7F (amount=0x7F=127 → index=128) means "use keymap mode"
         if parsed.phrase_index == 128 then
-            -- Fall through to keymap lookup
             phrase = M.find_phrase_by_keymap(parsed.note_value, instrument)
         else
             phrase = instrument.phrases[parsed.phrase_index]
