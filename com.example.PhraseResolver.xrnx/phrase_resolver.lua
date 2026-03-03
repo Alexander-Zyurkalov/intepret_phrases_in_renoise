@@ -322,7 +322,6 @@ end
 --- @return table            Single-element array of resolved lines
 
 function M._make_passthrough(parsed, options)
-    local song_lpb = (options and options.song_lpb) or 4
     return {
         {
             note_columns = {
@@ -337,7 +336,7 @@ function M._make_passthrough(parsed, options)
                 },
             },
             effect_columns = {},
-            phrase_line_index = nil,
+            phrase_line_index = 1,
             output_line_index = 1,
             time_in_beats = 0.0,
         },
