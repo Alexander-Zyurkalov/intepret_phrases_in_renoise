@@ -336,7 +336,7 @@ function M._make_passthrough(parsed, options)
                 },
             },
             effect_columns = {},
-            phrase_line_index = 1,
+            phrase_line_index = nil,
             output_line_index = 1,
             time_in_beats = 0.0,
         },
@@ -398,6 +398,134 @@ function M.resolve_pattern_phrase(pattern_line, instruments, options)
     end
 
     return M.resolve_phrase(parsed.note_value, phrase, options)
+end
+
+---------------------------------------------------------------------------
+-- Convert resolved phrase to PatternLine-shaped tables on a song grid
+---------------------------------------------------------------------------
+
+--- Make an empty note column with all EMPTY defaults.
+function M._empty_note_column()
+    return {
+        note_value = M.NOTE_EMPTY,
+        instrument_value = M.EMPTY_INSTRUMENT,
+        volume_value = M.EMPTY_VOLUME,
+        panning_value = M.EMPTY_PANNING,
+        delay_value = M.EMPTY_DELAY,
+        effect_number_value = M.EMPTY_EFFECT_NUMBER,
+        effect_amount_value = M.EMPTY_EFFECT_AMOUNT,
+    }
+end
+
+--- Convert resolved phrase lines into an array of PatternLine-shaped tables
+--- placed on a song-LPB grid.
+---
+--- Each resolved line's time_in_beats is quantised to the nearest song
+--- pattern line.  Sub-line timing is encoded in the delay column (0–255).
+--- When multiple resolved lines fall on the same pattern line, their note
+--- columns are placed side by side.
+---
+--- The returned array is 1-based and contiguous: index 1 is the trigger
+--- line (offset 0), and any empty lines in between are filled with empty
+--- PatternLine tables.
+---
+--- @param  resolved   table    Array from resolve_phrase / resolve_pattern_phrase
+--- @param  song_lpb   integer  The song's lines-per-beat
+--- @return table               Array of PatternLine tables (1-based, relative)
+
+function M.resolved_to_pattern_lines(resolved, song_lpb)
+    song_lpb = song_lpb or 4
+
+    if not resolved or #resolved == 0 then
+        return {}
+    end
+
+    -- Pass 1: compute pattern line offset and delay for each resolved line,
+    -- and find the total number of pattern lines we need.
+    local placements = {}   -- { offset (0-based), delay (0-255), resolved_line }
+    local max_offset = 0
+
+    for _, rline in ipairs(resolved) do
+        local beats = rline.time_in_beats or 0.0
+        local exact_line = beats * song_lpb
+        local offset = math.floor(exact_line)
+        local frac = exact_line - offset
+        local delay = math.floor(frac * 256 + 0.5)
+        if delay > 255 then
+            delay = 0
+            offset = offset + 1
+        end
+
+        placements[#placements + 1] = {
+            offset = offset,
+            delay = delay,
+            resolved_line = rline,
+        }
+
+        if offset > max_offset then
+            max_offset = offset
+        end
+    end
+
+    -- Pass 2: group placements by pattern line offset.
+    local by_offset = {}  -- offset → list of placements
+    for _, p in ipairs(placements) do
+        local key = p.offset
+        if not by_offset[key] then
+            by_offset[key] = {}
+        end
+        by_offset[key][#by_offset[key] + 1] = p
+    end
+
+    -- Pass 3: build contiguous PatternLine array.
+    local result = {}
+
+    for off = 0, max_offset do
+        local group = by_offset[off]
+
+        if not group then
+            -- Empty line
+            result[off + 1] = { note_columns = {}, effect_columns = {} }
+        else
+            local note_cols = {}
+            local fx_cols = {}
+
+            for _, p in ipairs(group) do
+                local rline = p.resolved_line
+
+                -- Append each note column from this resolved line
+                for _, col in ipairs(rline.note_columns or {}) do
+                    local nc = {
+                        note_value = col.note_value,
+                        instrument_value = col.instrument_value,
+                        volume_value = col.volume_value,
+                        panning_value = col.panning_value,
+                        delay_value = p.delay,
+                        effect_number_value = col.effect_number_value,
+                        effect_amount_value = col.effect_amount_value,
+                    }
+                    note_cols[#note_cols + 1] = nc
+                end
+
+                -- Append effect columns from this resolved line
+                for _, fc in ipairs(rline.effect_columns or {}) do
+                    fx_cols[#fx_cols + 1] = {
+                        number_value = fc.number_value,
+                        number_string = fc.number_string,
+                        amount_value = fc.amount_value,
+                        amount_string = fc.amount_string,
+                    }
+                end
+            end
+
+            result[off + 1] = {
+                note_columns = note_cols,
+                effect_columns = fx_cols,
+            }
+        end
+    end
+
+    return result
 end
 
 ---------------------------------------------------------------------------

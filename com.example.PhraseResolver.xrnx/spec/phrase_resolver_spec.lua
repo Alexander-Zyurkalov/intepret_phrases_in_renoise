@@ -647,6 +647,105 @@ describe("resolve_pattern_phrase", function()
 end)
 
 ---------------------------------------------------------------------------
+-- resolved_to_pattern_lines
+---------------------------------------------------------------------------
+
+describe("resolved_to_pattern_lines", function()
+    it("maps 1:1 when phrase LPB == song LPB", function()
+        local phrase = make_phrase({{48},{52},{55}}, { lpb = 4 })
+        local resolved = PR.resolve_phrase(48, phrase, { song_lpb = 4 })
+        local lines = PR.resolved_to_pattern_lines(resolved, 4)
+        assert.are.equal(3, #lines)
+        assert.are.equal(48, lines[1].note_columns[1].note_value)
+        assert.are.equal(52, lines[2].note_columns[1].note_value)
+        assert.are.equal(55, lines[3].note_columns[1].note_value)
+        assert.are.equal(0,  lines[1].note_columns[1].delay_value)
+        assert.are.equal(0,  lines[2].note_columns[1].delay_value)
+    end)
+
+    it("spreads out when phrase LPB < song LPB", function()
+        -- phrase LPB=2, song LPB=4: each phrase line spans 2 song lines
+        local phrase = make_phrase({{48},{52},{55}}, { lpb = 2 })
+        local resolved = PR.resolve_phrase(48, phrase, { song_lpb = 2 })
+        local lines = PR.resolved_to_pattern_lines(resolved, 4)
+        -- time_in_beats: 0.0, 0.5, 1.0 → offsets at LPB 4: 0, 2, 4
+        assert.are.equal(5, #lines)
+        assert.are.equal(48, lines[1].note_columns[1].note_value)
+        assert.are.equal(0,  #lines[2].note_columns)  -- empty gap
+        assert.are.equal(52, lines[3].note_columns[1].note_value)
+        assert.are.equal(0,  #lines[4].note_columns)  -- empty gap
+        assert.are.equal(55, lines[5].note_columns[1].note_value)
+    end)
+
+    it("compresses when phrase LPB > song LPB, using delay", function()
+        -- phrase LPB=8, song LPB=4: two phrase lines per song line
+        local phrase = make_phrase({{48},{52},{55},{60}}, { lpb = 8 })
+        local resolved = PR.resolve_phrase(48, phrase, { song_lpb = 8 })
+        local lines = PR.resolved_to_pattern_lines(resolved, 4)
+        -- time_in_beats: 0, 0.125, 0.25, 0.375 → at LPB 4: 0.0, 0.5, 1.0, 1.5
+        -- offsets: 0, 0, 1, 1 with delays: 0, 128, 0, 128
+        assert.are.equal(2, #lines)
+        assert.are.equal(2, #lines[1].note_columns)
+        assert.are.equal(48, lines[1].note_columns[1].note_value)
+        assert.are.equal(0,  lines[1].note_columns[1].delay_value)
+        assert.are.equal(52, lines[1].note_columns[2].note_value)
+        assert.are.equal(128, lines[1].note_columns[2].delay_value)
+        assert.are.equal(2, #lines[2].note_columns)
+        assert.are.equal(55, lines[2].note_columns[1].note_value)
+        assert.are.equal(60, lines[2].note_columns[2].note_value)
+    end)
+
+    it("returns empty array for empty resolved", function()
+        assert.are.same({}, PR.resolved_to_pattern_lines({}, 4))
+    end)
+
+    it("returns empty array for nil resolved", function()
+        assert.are.same({}, PR.resolved_to_pattern_lines(nil, 4))
+    end)
+
+    it("handles single-line passthrough", function()
+        local resolved = {
+            {
+                note_columns = {{ note_value = 60, instrument_value = 0, volume_value = 80 }},
+                effect_columns = {},
+                time_in_beats = 0.0,
+            },
+        }
+        local lines = PR.resolved_to_pattern_lines(resolved, 4)
+        assert.are.equal(1, #lines)
+        assert.are.equal(60, lines[1].note_columns[1].note_value)
+        assert.are.equal(80, lines[1].note_columns[1].volume_value)
+    end)
+
+    it("preserves effect columns", function()
+        local phrase = make_phrase({{48}}, { lpb = 4 })
+        phrase.lines[1].effect_columns = {
+            { number_value = 10, number_string = "0G", amount_value = 0x50, amount_string = "50" },
+        }
+        local resolved = PR.resolve_phrase(48, phrase)
+        local lines = PR.resolved_to_pattern_lines(resolved, 4)
+        assert.are.equal("0G", lines[1].effect_columns[1].number_string)
+        assert.are.equal(0x50, lines[1].effect_columns[1].amount_value)
+    end)
+
+    it("handles multi-column phrases", function()
+        local phrase = make_phrase({{48, 60}}, { lpb = 4 })
+        local resolved = PR.resolve_phrase(48, phrase)
+        local lines = PR.resolved_to_pattern_lines(resolved, 4)
+        assert.are.equal(2, #lines[1].note_columns)
+        assert.are.equal(48, lines[1].note_columns[1].note_value)
+        assert.are.equal(60, lines[1].note_columns[2].note_value)
+    end)
+
+    it("defaults song_lpb to 4", function()
+        local phrase = make_phrase({{48},{52}}, { lpb = 4 })
+        local resolved = PR.resolve_phrase(48, phrase)
+        local lines = PR.resolved_to_pattern_lines(resolved)
+        assert.are.equal(2, #lines)
+    end)
+end)
+
+---------------------------------------------------------------------------
 -- Integration scenario
 ---------------------------------------------------------------------------
 
