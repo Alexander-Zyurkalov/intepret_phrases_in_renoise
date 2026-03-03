@@ -28,7 +28,7 @@ local function make_phrase(notes, overrides)
         base_note       = PR.DEFAULT_BASE_NOTE,  -- C-4
         key_tracking    = PR.KEY_TRACKING_TRANSPOSE,
         lpb             = 4,
-        loop_mode       = PR.LOOP_OFF,
+        looping         = false,
         loop_start      = 1,
         loop_end        = #lines,
     }
@@ -150,25 +150,25 @@ end)
 ---------------------------------------------------------------------------
 
 describe("_generate_line_sequence", function()
-    it("generates a simple non-looped sequence", function()
-        local phrase = { number_of_lines = 4, loop_mode = PR.LOOP_OFF }
+    it("generates a simple one-shot sequence", function()
+        local phrase = { number_of_lines = 4, looping = false }
         assert.are.same({1,2,3,4}, PR._generate_line_sequence(phrase, 4))
     end)
 
-    it("truncates when num_lines < phrase length (no loop)", function()
-        local phrase = { number_of_lines = 8, loop_mode = PR.LOOP_OFF }
+    it("truncates when num_lines < phrase length (one-shot)", function()
+        local phrase = { number_of_lines = 8, looping = false }
         assert.are.same({1,2,3}, PR._generate_line_sequence(phrase, 3))
     end)
 
-    it("does not exceed phrase length when no loop and num_lines > length", function()
-        local phrase = { number_of_lines = 3, loop_mode = PR.LOOP_OFF }
+    it("does not exceed phrase length when one-shot and num_lines > length", function()
+        local phrase = { number_of_lines = 3, looping = false }
         assert.are.same({1,2,3}, PR._generate_line_sequence(phrase, 10))
     end)
 
     it("generates forward loop", function()
         local phrase = {
             number_of_lines = 4,
-            loop_mode  = PR.LOOP_FORWARD,
+            looping    = true,
             loop_start = 2,
             loop_end   = 4,
         }
@@ -180,7 +180,7 @@ describe("_generate_line_sequence", function()
     it("generates forward loop with loop covering full phrase", function()
         local phrase = {
             number_of_lines = 3,
-            loop_mode  = PR.LOOP_FORWARD,
+            looping    = true,
             loop_start = 1,
             loop_end   = 3,
         }
@@ -188,39 +188,20 @@ describe("_generate_line_sequence", function()
         assert.are.same({1,2,3,1,2,3,1}, seq)
     end)
 
-    it("generates ping-pong loop", function()
-        local phrase = {
-            number_of_lines = 5,
-            loop_mode  = PR.LOOP_PING_PONG,
-            loop_start = 2,
-            loop_end   = 4,
-        }
-        -- Play 1,2,3,4 then bounce: 3,2,3,4,3,2,...
-        local seq = PR._generate_line_sequence(phrase, 12)
-        assert.are.same({1,2,3,4,3,2,3,4,3,2,3,4}, seq)
-    end)
-
-    it("generates reverse loop", function()
-        local phrase = {
-            number_of_lines = 4,
-            loop_mode  = PR.LOOP_REVERSE,
-            loop_start = 2,
-            loop_end   = 4,
-        }
-        -- Play 1,2,3,4, then backwards: 3,2, then wraps to 4,3,2, ...
-        local seq = PR._generate_line_sequence(phrase, 10)
-        assert.are.same({1,2,3,4,3,2,4,3,2,4}, seq)
-    end)
-
     it("handles single-line loop", function()
         local phrase = {
             number_of_lines = 4,
-            loop_mode  = PR.LOOP_FORWARD,
+            looping    = true,
             loop_start = 3,
             loop_end   = 3,
         }
         local seq = PR._generate_line_sequence(phrase, 6)
         assert.are.same({1,2,3,3,3,3}, seq)
+    end)
+
+    it("defaults to one-shot when looping is nil", function()
+        local phrase = { number_of_lines = 3 }
+        assert.are.same({1,2,3}, PR._generate_line_sequence(phrase, 5))
     end)
 end)
 
@@ -362,7 +343,7 @@ end)
 describe("resolve_phrase with num_lines and looping", function()
     it("generates extra lines via forward loop", function()
         local phrase = make_phrase({{48},{50},{52}}, {
-            loop_mode  = PR.LOOP_FORWARD,
+            looping    = true,
             loop_start = 1,
             loop_end   = 3,
         })
@@ -423,13 +404,12 @@ describe("resolve_phrase edge cases", function()
     it("handles nil note_value in a column", function()
         local phrase = {
             lines = {
-                [1] = { note_columns = { [1] = { volume = 128 } } },  -- no note_value key
+                [1] = { note_columns = { [1] = { volume = 128 } } },
             },
             number_of_lines = 1,
             lpb = 4,
         }
         local result = PR.resolve_phrase(48, phrase)
-        -- missing note_value should be treated as EMPTY
         assert.are.equal(PR.NOTE_EMPTY, result[1].note_columns[1].note_value)
     end)
 end)
@@ -474,8 +454,8 @@ describe("parse_pattern_line", function()
             note_value       = 48,
             instrument_index = 1,
             effect_columns   = {
-                { number = 0x01, amount = 5 },  -- not Z
-                { number = 0x09, amount = 3 },  -- not Z
+                { number = 0x01, amount = 5 },
+                { number = 0x09, amount = 3 },
             },
         }
         local p = PR.parse_pattern_line(line)
@@ -563,11 +543,11 @@ describe("integration: realistic arpeggio phrase", function()
         local arp = make_phrase(
                 {{48},{52},{55},{52}},  -- C4, E4, G4, E4
                 {
-                    base_note   = 48,
-                    lpb         = 8,
-                    loop_mode   = PR.LOOP_FORWARD,
-                    loop_start  = 1,
-                    loop_end    = 4,
+                    base_note  = 48,
+                    lpb        = 8,
+                    looping    = true,
+                    loop_start = 1,
+                    loop_end   = 4,
                 }
         )
 

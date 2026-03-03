@@ -7,21 +7,16 @@
 local M = {}
 
 ---------------------------------------------------------------------------
--- Constants
+-- Constants (matching Renoise API values)
 ---------------------------------------------------------------------------
 
 M.NOTE_OFF   = 120
 M.NOTE_EMPTY = 121
 
--- Key tracking modes (matches Renoise behaviour)
-M.KEY_TRACKING_NONE      = 0   -- phrase plays at fixed pitch
-M.KEY_TRACKING_TRANSPOSE = 1   -- phrase transposes relative to base note
-
--- Loop modes
-M.LOOP_OFF       = 0
-M.LOOP_FORWARD   = 1
-M.LOOP_REVERSE   = 2
-M.LOOP_PING_PONG = 3
+-- Key tracking modes (Renoise API: 1-based)
+M.KEY_TRACKING_NONE      = 1
+M.KEY_TRACKING_TRANSPOSE = 2
+M.KEY_TRACKING_OFFSET    = 3
 
 -- Default base note (C-4 in Renoise's 0-119 range)
 M.DEFAULT_BASE_NOTE = 48
@@ -30,12 +25,16 @@ M.DEFAULT_BASE_NOTE = 48
 M.EFFECT_Z = 0x18
 
 ---------------------------------------------------------------------------
--- Internal: build a sequence of phrase-line indices honouring loop mode
+-- Internal: build a sequence of phrase-line indices honouring looping
 ---------------------------------------------------------------------------
+
+--- In the Renoise API, phrases have a boolean `looping` flag and
+--- `loop_start` / `loop_end` bounds. When looping is on, the loop is
+--- always a forward loop.
 
 function M._generate_line_sequence(phrase, num_lines)
     local total      = phrase.number_of_lines
-    local loop_mode  = phrase.loop_mode  or M.LOOP_OFF
+    local looping    = phrase.looping or false
     local loop_start = phrase.loop_start or 1
     local loop_end   = phrase.loop_end   or total
 
@@ -45,12 +44,13 @@ function M._generate_line_sequence(phrase, num_lines)
 
     local indices = {}
 
-    if loop_mode == M.LOOP_OFF then
+    if not looping then
+        -- One-shot: play up to total lines, never beyond
         for i = 1, math.min(num_lines, total) do
             indices[#indices + 1] = i
         end
-
-    elseif loop_mode == M.LOOP_FORWARD then
+    else
+        -- Forward loop: play from 1, then loop between loop_start..loop_end
         local idx = 1
         for _ = 1, num_lines do
             indices[#indices + 1] = idx
@@ -58,54 +58,6 @@ function M._generate_line_sequence(phrase, num_lines)
                 idx = loop_start
             else
                 idx = idx + 1
-            end
-        end
-
-    elseif loop_mode == M.LOOP_REVERSE then
-        -- Play forwards to loop_end, then loop backwards loop_end→loop_start
-        local idx = 1
-        local in_loop = false
-        for _ = 1, num_lines do
-            indices[#indices + 1] = idx
-            if not in_loop then
-                if idx >= loop_end then
-                    in_loop = true
-                    idx = idx - 1
-                else
-                    idx = idx + 1
-                end
-            else
-                idx = idx - 1
-                if idx < loop_start then
-                    idx = loop_end
-                end
-            end
-        end
-
-    elseif loop_mode == M.LOOP_PING_PONG then
-        local idx = 1
-        local direction = 1
-        local in_loop = false
-        for _ = 1, num_lines do
-            indices[#indices + 1] = idx
-            if not in_loop then
-                if idx >= loop_end then
-                    in_loop = true
-                    direction = -1
-                    idx = idx - 1
-                else
-                    idx = idx + 1
-                end
-            else
-                local next_idx = idx + direction
-                if next_idx > loop_end then
-                    direction = -1
-                    next_idx = idx - 1
-                elseif next_idx < loop_start then
-                    direction = 1
-                    next_idx = idx + 1
-                end
-                idx = next_idx
             end
         end
     end
@@ -140,15 +92,15 @@ end
 ---   lines            = { [1]={note_columns={{note_value=,volume=,...},...}}, ... },
 ---   number_of_lines  = 16,
 ---   base_note        = 48,          -- optional, default C-4
----   key_tracking     = 1,           -- optional, default TRANSPOSE
+---   key_tracking     = 2,           -- optional, default TRANSPOSE (Renoise API: 2)
 ---   lpb              = 4,           -- phrase LPB
----   loop_mode        = 0,           -- optional, default OFF
+---   looping          = false,       -- optional, default false (one-shot)
 ---   loop_start       = 1,           -- optional, 1-based
 ---   loop_end         = 16,          -- optional, 1-based
 --- }
 ---
 --- options = {
----   song_lpb   = 4,                 -- song LPB for timing
+---   song_lpb   = 4,                 -- song LPB for timing fallback
 ---   num_lines  = nil,               -- lines to generate (default = phrase length)
 --- }
 ---
