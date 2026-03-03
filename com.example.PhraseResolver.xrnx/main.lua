@@ -106,9 +106,11 @@ local function setup_res_track()
         song:track(group_idx).name = source_name
         song:track(group_idx).color = source_color
 
-        -- Add source first (leftmost), then _res (rightmost).
-        -- After adding source, indices shift: _res moves to src_idx, group to src_idx+1.
-        song:add_track_to_group(src_idx, group_idx)
+        -- add_track_to_group places the track at the left of the group,
+        -- so the last one added ends up leftmost.
+        -- Add _res first (will be pushed right), then source (stays left).
+        song:add_track_to_group(res_idx, group_idx)
+        -- After that: source is at src_idx, group is at src_idx + 1.
         song:add_track_to_group(src_idx, src_idx + 1)
     end
 
