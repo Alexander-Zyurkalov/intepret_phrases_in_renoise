@@ -336,7 +336,8 @@ describe("resolve_phrase timing", function()
     end)
 
     it("defaults phrase LPB to song LPB when not set", function()
-        local phrase = make_phrase({{48},{48}}, { lpb = nil })
+        local phrase = make_phrase({{48},{48}})
+        phrase.lpb = nil  -- remove LPB so it falls back to song_lpb
         local result = PR.resolve_phrase(48, phrase, { song_lpb = 8 })
 
         assert.are.equal(0.0,   result[1].time_in_beats)
@@ -420,9 +421,15 @@ describe("resolve_phrase edge cases", function()
     end)
 
     it("handles nil note_value in a column", function()
-        local phrase = make_phrase({{nil}})
+        local phrase = {
+            lines = {
+                [1] = { note_columns = { [1] = { volume = 128 } } },  -- no note_value key
+            },
+            number_of_lines = 1,
+            lpb = 4,
+        }
         local result = PR.resolve_phrase(48, phrase)
-        -- nil note_value should be treated as EMPTY
+        -- missing note_value should be treated as EMPTY
         assert.are.equal(PR.NOTE_EMPTY, result[1].note_columns[1].note_value)
     end)
 end)

@@ -92,19 +92,20 @@ function M._generate_line_sequence(phrase, num_lines)
                 if idx >= loop_end then
                     in_loop = true
                     direction = -1
-                    idx = idx + direction
+                    idx = idx - 1
                 else
                     idx = idx + 1
                 end
             else
-                idx = idx + direction
-                if idx > loop_end then
+                local next_idx = idx + direction
+                if next_idx > loop_end then
                     direction = -1
-                    idx = loop_end
-                elseif idx < loop_start then
+                    next_idx = idx - 1
+                elseif next_idx < loop_start then
                     direction = 1
-                    idx = loop_start
+                    next_idx = idx + 1
                 end
+                idx = next_idx
             end
         end
     end
