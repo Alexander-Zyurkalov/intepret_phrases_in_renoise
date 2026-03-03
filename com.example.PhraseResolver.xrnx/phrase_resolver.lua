@@ -21,20 +21,20 @@ local M = {}
 -- Constants (matching Renoise API values)
 ---------------------------------------------------------------------------
 
-M.NOTE_OFF   = 120
+M.NOTE_OFF = 120
 M.NOTE_EMPTY = 121
 
-M.EMPTY_INSTRUMENT    = 255
-M.EMPTY_VOLUME        = 255
-M.EMPTY_PANNING       = 255
-M.EMPTY_DELAY         = 0
+M.EMPTY_INSTRUMENT = 255
+M.EMPTY_VOLUME = 255
+M.EMPTY_PANNING = 255
+M.EMPTY_DELAY = 0
 M.EMPTY_EFFECT_NUMBER = 0
 M.EMPTY_EFFECT_AMOUNT = 0
 
 -- Key tracking modes (Renoise API: 1-based)
-M.KEY_TRACKING_NONE      = 1
+M.KEY_TRACKING_NONE = 1
 M.KEY_TRACKING_TRANSPOSE = 2
-M.KEY_TRACKING_OFFSET    = 3
+M.KEY_TRACKING_OFFSET = 3
 
 -- Default base note (C-4 in Renoise's 0-119 range)
 M.DEFAULT_BASE_NOTE = 48
@@ -78,12 +78,16 @@ function M.encode_effect_string(s)
     s = s:upper()
     local function char_to_num(c)
         local b = c:byte()
-        if b >= 0x30 and b <= 0x39 then return b - 0x30 end       -- '0'-'9'
-        if b >= 0x41 and b <= 0x5A then return b - 0x41 + 0x0A end -- 'A'-'Z'
+        if b >= 0x30 and b <= 0x39 then
+            return b - 0x30
+        end       -- '0'-'9'
+        if b >= 0x41 and b <= 0x5A then
+            return b - 0x41 + 0x0A
+        end -- 'A'-'Z'
         return 0
     end
-    local hi = char_to_num(s:sub(1,1))
-    local lo = char_to_num(s:sub(2,2))
+    local hi = char_to_num(s:sub(1, 1))
+    local lo = char_to_num(s:sub(2, 2))
     return hi * 256 + lo
 end
 
@@ -95,13 +99,13 @@ M._zxx_number_value = M.encode_effect_string(M.ZXX_EFFECT_STRING)
 ---------------------------------------------------------------------------
 
 function M._generate_line_sequence(phrase, num_lines)
-    local total      = phrase.number_of_lines
-    local looping    = phrase.looping or false
+    local total = phrase.number_of_lines
+    local looping = phrase.looping or false
     local loop_start = phrase.loop_start or 1
-    local loop_end   = phrase.loop_end   or total
+    local loop_end = phrase.loop_end or total
 
     loop_start = math.max(1, math.min(loop_start, total))
-    loop_end   = math.max(loop_start, math.min(loop_end, total))
+    loop_end = math.max(loop_start, math.min(loop_end, total))
 
     local indices = {}
 
@@ -183,11 +187,11 @@ end
 function M.resolve_phrase(trigger_note, phrase, options)
     options = options or {}
 
-    local song_lpb      = options.song_lpb  or 4
-    local num_out       = options.num_lines or phrase.number_of_lines
-    local base_note     = phrase.base_note     or M.DEFAULT_BASE_NOTE
-    local key_tracking  = phrase.key_tracking  or M.KEY_TRACKING_TRANSPOSE
-    local phrase_lpb    = phrase.lpb           or song_lpb
+    local song_lpb = options.song_lpb or 4
+    local num_out = options.num_lines or phrase.number_of_lines
+    local base_note = phrase.base_note or M.DEFAULT_BASE_NOTE
+    local key_tracking = phrase.key_tracking or M.KEY_TRACKING_TRANSPOSE
+    local phrase_lpb = phrase.lpb or song_lpb
 
     local transpose = 0
     if key_tracking == M.KEY_TRACKING_TRANSPOSE then
@@ -200,20 +204,22 @@ function M.resolve_phrase(trigger_note, phrase, options)
     local result = {}
 
     for out_idx, ph_idx in ipairs(line_indices) do
-        local ph_line  = phrase.lines[ph_idx] or {}
-        local columns  = ph_line.note_columns or {}
+        local ph_line = phrase.lines[ph_idx] or {}
+        local columns = ph_line.note_columns or {}
         local res_cols = {}
 
         for col_i, col in ipairs(columns) do
             local nv = col.note_value
-            if nv == nil then nv = M.NOTE_EMPTY end
+            if nv == nil then
+                nv = M.NOTE_EMPTY
+            end
 
             res_cols[col_i] = {
-                note_value          = M._transpose_note(nv, transpose),
-                instrument_value    = col.instrument_value,
-                volume_value        = col.volume_value,
-                panning_value       = col.panning_value,
-                delay_value         = col.delay_value,
+                note_value = M._transpose_note(nv, transpose),
+                instrument_value = col.instrument_value,
+                volume_value = col.volume_value,
+                panning_value = col.panning_value,
+                delay_value = col.delay_value,
                 effect_number_value = col.effect_number_value,
                 effect_amount_value = col.effect_amount_value,
             }
@@ -224,19 +230,19 @@ function M.resolve_phrase(trigger_note, phrase, options)
         local fx_cols = ph_line.effect_columns or {}
         for fx_i, fx in ipairs(fx_cols) do
             res_fx[fx_i] = {
-                number_value  = fx.number_value,
+                number_value = fx.number_value,
                 number_string = fx.number_string,
-                amount_value  = fx.amount_value,
+                amount_value = fx.amount_value,
                 amount_string = fx.amount_string,
             }
         end
 
         result[out_idx] = {
-            note_columns      = res_cols,
-            effect_columns    = res_fx,
-            phrase_line_index  = ph_idx,
-            output_line_index  = out_idx,
-            time_in_beats      = (out_idx - 1) * beat_per_phrase_line,
+            note_columns = res_cols,
+            effect_columns = res_fx,
+            phrase_line_index = ph_idx,
+            output_line_index = out_idx,
+            time_in_beats = (out_idx - 1) * beat_per_phrase_line,
         }
     end
 
@@ -267,14 +273,14 @@ function M.parse_pattern_line(line, col_index)
     local nc = note_cols[col_index] or {}
 
     local result = {
-        note_value       = nc.note_value,
+        note_value = nc.note_value,
         instrument_value = nc.instrument_value,
-        phrase_index     = nil,
+        phrase_index = nil,
     }
 
     -- 1. Check the note column's own effect sub-column
     if M._is_zxx(nc.effect_number_string, nc.effect_number_value) then
-        result.phrase_index = (nc.effect_amount_value or 0) + 1
+        result.phrase_index = (nc.effect_amount_value or 0)
         return result
     end
 
@@ -282,7 +288,7 @@ function M.parse_pattern_line(line, col_index)
     if line.effect_columns then
         for _, fx in ipairs(line.effect_columns) do
             if M._is_zxx(fx.number_string, fx.number_value) then
-                result.phrase_index = (fx.amount_value or 0) + 1
+                result.phrase_index = (fx.amount_value or 0)
                 return result
             end
         end
@@ -319,10 +325,10 @@ function M.find_phrase_by_keymap(note_value, instrument)
 
             if mapping.note_range then
                 range_start = mapping.note_range[1]
-                range_end   = mapping.note_range[2]
+                range_end = mapping.note_range[2]
             else
                 range_start = mapping.note_range_start
-                range_end   = mapping.note_range_end
+                range_end = mapping.note_range_end
             end
 
             if range_start and range_end
@@ -386,16 +392,10 @@ function M.resolve_pattern_phrase(pattern_line, instruments, options)
 
     local phrase
 
-    if parsed.phrase_index then
-        -- Z7F (amount=0x7F=127 → index=128) means "use keymap mode"
-        if parsed.phrase_index == 128 then
-            phrase = M.find_phrase_by_keymap(parsed.note_value, instrument)
-        else
-            phrase = instrument.phrases[parsed.phrase_index]
-        end
+    if parsed.phrase_index and parsed.phrase_index ~= 0 then
+        phrase = instrument.phrases[parsed.phrase_index]
     else
-        -- No Zxx: try keymap-based lookup
-        phrase = M.find_phrase_by_keymap(parsed.note_value, instrument)
+        phrase = parsed
     end
 
     if not phrase then
@@ -410,28 +410,40 @@ end
 ---------------------------------------------------------------------------
 
 function M.note_to_string(note_value)
-    if note_value == M.NOTE_OFF   then return "OFF" end
-    if note_value == M.NOTE_EMPTY then return "---" end
-    if note_value < 0 or note_value > 119 then return "???" end
+    if note_value == M.NOTE_OFF then
+        return "OFF"
+    end
+    if note_value == M.NOTE_EMPTY then
+        return "---"
+    end
+    if note_value < 0 or note_value > 119 then
+        return "???"
+    end
 
-    local names = {"C-","C#","D-","D#","E-","F-","F#","G-","G#","A-","A#","B-"}
-    local name   = names[(note_value % 12) + 1]
+    local names = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" }
+    local name = names[(note_value % 12) + 1]
     local octave = math.floor(note_value / 12)
     return name .. octave
 end
 
 function M.string_to_note(s)
-    if s == "OFF" then return M.NOTE_OFF   end
-    if s == "---" then return M.NOTE_EMPTY end
+    if s == "OFF" then
+        return M.NOTE_OFF
+    end
+    if s == "---" then
+        return M.NOTE_EMPTY
+    end
 
     local map = {
-        ["C-"]=0,["C#"]=1,["D-"]=2,["D#"]=3,["E-"]=4,["F-"]=5,
-        ["F#"]=6,["G-"]=7,["G#"]=8,["A-"]=9,["A#"]=10,["B-"]=11,
+        ["C-"] = 0, ["C#"] = 1, ["D-"] = 2, ["D#"] = 3, ["E-"] = 4, ["F-"] = 5,
+        ["F#"] = 6, ["G-"] = 7, ["G#"] = 8, ["A-"] = 9, ["A#"] = 10, ["B-"] = 11,
     }
 
-    local name   = s:sub(1, 2)
+    local name = s:sub(1, 2)
     local octave = tonumber(s:sub(3, 3))
-    if not map[name] or not octave then return nil end
+    if not map[name] or not octave then
+        return nil
+    end
     return octave * 12 + map[name]
 end
 

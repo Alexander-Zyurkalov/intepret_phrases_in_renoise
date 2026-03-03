@@ -394,7 +394,7 @@ describe("parse_pattern_line with Zxx in effect columns", function()
         local p = PR.parse_pattern_line(line)
         assert.are.equal(48, p.note_value)
         assert.are.equal(1,  p.instrument_value)
-        assert.are.equal(6,  p.phrase_index)  -- 0x05 + 1
+        assert.are.equal(5,  p.phrase_index)  -- 0x05 + 1
     end)
 
     it("returns nil phrase_index when no Zxx present", function()
@@ -427,7 +427,7 @@ describe("parse_pattern_line with Zxx in note column", function()
         local line = make_pattern_line_nc(60, 2, 0x03)
         local p = PR.parse_pattern_line(line)
         assert.are.equal(60, p.note_value)
-        assert.are.equal(4,  p.phrase_index)  -- 0x03 + 1
+        assert.are.equal(3,  p.phrase_index)
     end)
 
     it("note column Zxx takes priority over effect column Zxx", function()
@@ -444,7 +444,7 @@ describe("parse_pattern_line with Zxx in note column", function()
                               }},
         }
         local p = PR.parse_pattern_line(line)
-        assert.are.equal(3, p.phrase_index)  -- note column wins
+        assert.are.equal(2, p.phrase_index)  -- note column wins
     end)
 
     it("falls back to effect column when note column has no Zxx", function()
@@ -460,7 +460,7 @@ describe("parse_pattern_line with Zxx in note column", function()
                               }},
         }
         local p = PR.parse_pattern_line(line)
-        assert.are.equal(5, p.phrase_index)
+        assert.are.equal(4, p.phrase_index)
     end)
 end)
 
@@ -481,7 +481,7 @@ describe("parse_pattern_line col_index", function()
         local p = PR.parse_pattern_line(line, 2)
         assert.are.equal(60, p.note_value)
         assert.are.equal(1,  p.instrument_value)
-        assert.are.equal(2,  p.phrase_index)
+        assert.are.equal(1,  p.phrase_index)
     end)
 
     it("defaults to column 1", function()
@@ -495,7 +495,7 @@ describe("parse_pattern_line col_index", function()
         }
         local p = PR.parse_pattern_line(line)
         assert.are.equal(48, p.note_value)
-        assert.are.equal(1,  p.phrase_index)
+        assert.are.equal(0,  p.phrase_index)
     end)
 end)
 
@@ -598,22 +598,22 @@ describe("resolve_pattern_phrase", function()
     end)
 
     it("resolves Zxx from effect column", function()
-        local line = make_pattern_line_fx(48, 0, 0)  -- inst 0, Z00 → phrase 1
+        local line = make_pattern_line_fx(48, 0, 1)  -- inst 0, Z01 → phrase 1
         assert.are.same({48,52,55}, collect_notes(PR.resolve_pattern_phrase(line, instruments)))
     end)
 
     it("resolves Zxx from note column", function()
-        local line = make_pattern_line_nc(48, 0, 0)  -- inst 0, Z00 → phrase 1
+        local line = make_pattern_line_nc(48, 0, 1)  -- inst 0, Z00 → phrase 1
         assert.are.same({48,52,55}, collect_notes(PR.resolve_pattern_phrase(line, instruments)))
     end)
 
     it("resolves with transposition", function()
-        local line = make_pattern_line_fx(72, 0, 1)  -- inst 0, Z01 → phrase 2, +12
+        local line = make_pattern_line_fx(72, 0, 2)  -- inst 0, Z01 → phrase 2, +12
         assert.are.same({72,76,79}, collect_notes(PR.resolve_pattern_phrase(line, instruments)))
     end)
 
     it("looks up the correct instrument by instrument_value", function()
-        local line = make_pattern_line_fx(36, 1, 0)  -- inst 1, Z00 → instruments[2].phrases[1]
+        local line = make_pattern_line_fx(36, 1, 1)  -- inst 1, Z00 → instruments[2].phrases[1]
         assert.are.same({36,40,43}, collect_notes(PR.resolve_pattern_phrase(line, instruments)))
     end)
 
