@@ -106,10 +106,10 @@ local function setup_res_track()
         song:track(group_idx).name = source_name
         song:track(group_idx).color = source_color
 
-        -- Add _res first, then source (indices stay valid because
-        -- members appear before the group track in the flat list).
-        song:add_track_to_group(res_idx, group_idx)
+        -- Add source first (leftmost), then _res (rightmost).
+        -- After adding source, indices shift: _res moves to src_idx, group to src_idx+1.
         song:add_track_to_group(src_idx, group_idx)
+        song:add_track_to_group(src_idx, src_idx + 1)
     end
 
     renoise.app():show_status("Phrase Resolver: set up '" .. res_name .. "'.")
@@ -189,9 +189,7 @@ local function write_to_track(pattern, target_track_idx, start_line, pattern_lin
 
     for i, pline in ipairs(pattern_lines) do
         local line_idx = start_line + (i - 1)
-        if line_idx > pattern.number_of_lines then
-            break
-        end
+        if line_idx > pattern.number_of_lines then break end
 
         local target_line = track:line(line_idx)
         target_line:clear()
@@ -209,28 +207,18 @@ local function interpret_line(pos)
     local instruments = song.instruments
 
     -- Bounds check.
-    if pos.pattern < 1 or pos.pattern > #song.patterns then
-        return
-    end
+    if pos.pattern < 1 or pos.pattern > #song.patterns then return end
     local pattern = song:pattern(pos.pattern)
-    if pos.track < 1 or pos.track > #pattern.tracks then
-        return
-    end
+    if pos.track < 1 or pos.track > #pattern.tracks then return end
 
     -- Skip _res tracks and non-sequencer tracks.
     local track_obj = song:track(pos.track)
-    if is_resolved_track(track_obj.name) then
-        return
-    end
-    if track_obj.type ~= renoise.Track.TRACK_TYPE_SEQUENCER then
-        return
-    end
+    if is_resolved_track(track_obj.name) then return end
+    if track_obj.type ~= renoise.Track.TRACK_TYPE_SEQUENCER then return end
 
     -- Only process if a _res track has been set up for this track.
     local res_idx = find_res_track(pos.track)
-    if not res_idx then
-        return
-    end
+    if not res_idx then return end
 
     local line = pattern:track(pos.track):line(pos.line)
 
