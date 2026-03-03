@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RenoiseScriptingTool doc_version="0">
+  <Id>com.example.PhraseResolver</Id>
+  <ApiVersion>6.2</ApiVersion>
+  <Version>0.01</Version>
+  <Author>Alexandr Zyurkalov</Author>
+  <Name>Phrase Resolver</Name>
+  <Category>Pattern, Phrase</Category>
+  <Description>
+    Monitors pattern line edits, resolves instrument phrase triggers into a separate track.
+  </Description>
+</RenoiseScriptingTool>
