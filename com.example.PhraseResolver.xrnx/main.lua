@@ -54,22 +54,60 @@ local function intepret_line(pos)
     return
   end
 
+  local pattern_from_phrase = phrase_resolver.resolved_to_pattern_lines(resolved, renoise.song().transport.lpb)
+  local target_track_idx = pos.track + 1
 
-  for _, line in ipairs(resolved) do
-    local row = string.format("%3d    %-6.3f",
-            line.phrase_line_index, line.time_in_beats)
+  -- Bounds check
+  if target_track_idx > #song.tracks then return end
 
-    for _, col in ipairs(line.note_columns) do
-      local note_str = phrase_resolver.note_to_string(col.note_value)
-      local vol_str  = col.volume_value and col.volume_value ~= 255
-              and string.format("%3d", col.volume_value) or " .."
-      row = row .. string.format("  %-5s %s", note_str, vol_str)
+  local track = pattern:track(target_track_idx)
+  local rns_track = song:track(target_track_idx)  -- for adjusting visible columns
+
+  -- Find the max note/effect columns we need
+  local max_note_cols = 0
+  local max_fx_cols = 0
+  for _, pline in ipairs(pattern_from_phrase) do
+    if #pline.note_columns > max_note_cols then
+      max_note_cols = #pline.note_columns
     end
-    print(row)
+    if #pline.effect_columns > max_fx_cols then
+      max_fx_cols = #pline.effect_columns
+    end
   end
 
+  -- Expand visible columns if needed
+  if max_note_cols > rns_track.visible_note_columns then
+    rns_track.visible_note_columns = max_note_cols
+  end
+  if max_fx_cols > rns_track.visible_effect_columns then
+    rns_track.visible_effect_columns = max_fx_cols
+  end
 
+  -- Write lines
+  for i, pline in ipairs(pattern_from_phrase) do
+    local line_idx = pos.line + (i - 1)
+    if line_idx > pattern.number_of_lines then break end
 
+    local target_line = track:line(line_idx)
+    target_line:clear()
+
+    for col_i, col in ipairs(pline.note_columns) do
+      local nc = target_line:note_column(col_i)
+      nc.note_value          = col.note_value          or 121
+      nc.instrument_value    = col.instrument_value    or 255
+      nc.volume_value        = col.volume_value        or 255
+      nc.panning_value       = col.panning_value       or 255
+      nc.delay_value         = col.delay_value         or 0
+      nc.effect_number_value = col.effect_number_value or 0
+      nc.effect_amount_value = col.effect_amount_value or 0
+    end
+
+    for fx_i, fc in ipairs(pline.effect_columns) do
+      local ec = target_line:effect_column(fx_i)
+      ec.number_value = fc.number_value or 0
+      ec.amount_value = fc.amount_value or 0
+    end
+  end
 
 end
 
