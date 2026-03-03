@@ -390,11 +390,16 @@ end)
 
 describe("parse_pattern_line with Zxx in effect columns", function()
     it("extracts Zxx via number_string", function()
-        local line = make_pattern_line_fx(48, 1, 0x05)
+        local line = make_pattern_line_fx(48, 1, 0x05)  -- Z05 → phrase 5
         local p = PR.parse_pattern_line(line)
         assert.are.equal(48, p.note_value)
         assert.are.equal(1,  p.instrument_value)
-        assert.are.equal(5,  p.phrase_index)  -- 0x05 + 1
+        assert.are.equal(5,  p.phrase_index)
+    end)
+
+    it("Z00 means no phrase", function()
+        local line = make_pattern_line_fx(48, 1, 0x00)  -- Z00 → no phrase
+        assert.is_nil(PR.parse_pattern_line(line).phrase_index)
     end)
 
     it("returns nil phrase_index when no Zxx present", function()
@@ -424,23 +429,23 @@ end)
 
 describe("parse_pattern_line with Zxx in note column", function()
     it("extracts Zxx from note column effect_number_string", function()
-        local line = make_pattern_line_nc(60, 2, 0x03)
+        local line = make_pattern_line_nc(60, 2, 0x03)  -- Z03 → phrase 3
         local p = PR.parse_pattern_line(line)
         assert.are.equal(60, p.note_value)
         assert.are.equal(3,  p.phrase_index)
     end)
 
     it("note column Zxx takes priority over effect column Zxx", function()
-        -- Zxx in note column says phrase 3, effect column says phrase 7
+        -- Zxx in note column says phrase 2, effect column says phrase 6
         local line = {
             note_columns = {{
                                 note_value = 48, instrument_value = 0,
                                 effect_number_string = "0Z", effect_number_value = PR._zxx_number_value,
-                                effect_amount_value = 0x02,  -- phrase 3
+                                effect_amount_value = 0x02,  -- Z02 → phrase 2
                             }},
             effect_columns = {{
                                   number_string = "0Z", number_value = PR._zxx_number_value,
-                                  amount_value = 0x06,  -- phrase 7
+                                  amount_value = 0x06,  -- Z06 → phrase 6
                               }},
         }
         local p = PR.parse_pattern_line(line)
@@ -456,7 +461,7 @@ describe("parse_pattern_line with Zxx in note column", function()
                             }},
             effect_columns = {{
                                   number_string = "0Z", number_value = PR._zxx_number_value,
-                                  amount_value = 0x04,  -- phrase 5
+                                  amount_value = 0x04,  -- Z04 → phrase 4
                               }},
         }
         local p = PR.parse_pattern_line(line)
@@ -474,7 +479,7 @@ describe("parse_pattern_line col_index", function()
             note_columns = {
                 { note_value = 48, instrument_value = 0 },
                 { note_value = 60, instrument_value = 1,
-                  effect_number_string = "0Z", effect_amount_value = 0x01 },
+                  effect_number_string = "0Z", effect_amount_value = 0x01 },  -- Z01 → phrase 1
             },
             effect_columns = {},
         }
@@ -488,87 +493,14 @@ describe("parse_pattern_line col_index", function()
         local line = {
             note_columns = {
                 { note_value = 48, instrument_value = 0,
-                  effect_number_string = "0Z", effect_amount_value = 0x00 },
+                  effect_number_string = "0Z", effect_amount_value = 0x03 },  -- Z03 → phrase 3
                 { note_value = 60, instrument_value = 1 },
             },
             effect_columns = {},
         }
         local p = PR.parse_pattern_line(line)
         assert.are.equal(48, p.note_value)
-        assert.are.equal(0,  p.phrase_index)
-    end)
-end)
-
----------------------------------------------------------------------------
--- find_phrase_by_keymap
----------------------------------------------------------------------------
-
-describe("find_phrase_by_keymap", function()
-    local instrument
-
-    before_each(function()
-        instrument = {
-            phrases = {
-                { mapping = { note_range_start = 0,  note_range_end = 35 },
-                  lines = {}, number_of_lines = 4, lpb = 4, base_note = 24 },
-                { mapping = { note_range_start = 36, note_range_end = 71 },
-                  lines = {}, number_of_lines = 4, lpb = 4, base_note = 48 },
-                { mapping = { note_range_start = 72, note_range_end = 119 },
-                  lines = {}, number_of_lines = 4, lpb = 4, base_note = 84 },
-            },
-        }
-    end)
-
-    it("finds phrase for note in first range", function()
-        local phrase, idx = PR.find_phrase_by_keymap(24, instrument)
-        assert.are.equal(1, idx)
-        assert.are.equal(instrument.phrases[1], phrase)
-    end)
-
-    it("finds phrase for note in middle range", function()
-        local phrase, idx = PR.find_phrase_by_keymap(48, instrument)
-        assert.are.equal(2, idx)
-    end)
-
-    it("finds phrase at range boundary", function()
-        local phrase, idx = PR.find_phrase_by_keymap(71, instrument)
-        assert.are.equal(2, idx)
-    end)
-
-    it("finds phrase for note in last range", function()
-        local _, idx = PR.find_phrase_by_keymap(100, instrument)
-        assert.are.equal(3, idx)
-    end)
-
-    it("returns nil when no range matches", function()
-        -- Build instrument with a gap
-        local inst = {
-            phrases = {
-                { mapping = { note_range_start = 0, note_range_end = 30 },
-                  lines = {}, number_of_lines = 1, lpb = 4 },
-                { mapping = { note_range_start = 60, note_range_end = 90 },
-                  lines = {}, number_of_lines = 1, lpb = 4 },
-            },
-        }
-        local phrase, idx = PR.find_phrase_by_keymap(45, inst)
-        assert.is_nil(phrase)
-        assert.is_nil(idx)
-    end)
-
-    it("returns nil for nil instrument", function()
-        local phrase, idx = PR.find_phrase_by_keymap(48, nil)
-        assert.is_nil(phrase)
-    end)
-
-    it("supports note_range table format", function()
-        local inst = {
-            phrases = {
-                { mapping = { note_range = {36, 71} },
-                  lines = {}, number_of_lines = 1, lpb = 4 },
-            },
-        }
-        local _, idx = PR.find_phrase_by_keymap(48, inst)
-        assert.are.equal(1, idx)
+        assert.are.equal(3,  p.phrase_index)
     end)
 end)
 
@@ -603,72 +535,99 @@ describe("resolve_pattern_phrase", function()
     end)
 
     it("resolves Zxx from note column", function()
-        local line = make_pattern_line_nc(48, 0, 1)  -- inst 0, Z00 → phrase 1
+        local line = make_pattern_line_nc(48, 0, 1)  -- inst 0, Z01 → phrase 1
         assert.are.same({48,52,55}, collect_notes(PR.resolve_pattern_phrase(line, instruments)))
     end)
 
     it("resolves with transposition", function()
-        local line = make_pattern_line_fx(72, 0, 2)  -- inst 0, Z01 → phrase 2, +12
+        local line = make_pattern_line_fx(72, 0, 2)  -- inst 0, Z02 → phrase 2, +12
         assert.are.same({72,76,79}, collect_notes(PR.resolve_pattern_phrase(line, instruments)))
     end)
 
     it("looks up the correct instrument by instrument_value", function()
-        local line = make_pattern_line_fx(36, 1, 1)  -- inst 1, Z00 → instruments[2].phrases[1]
+        local line = make_pattern_line_fx(36, 1, 1)  -- inst 1, Z01 → instruments[2].phrases[1]
         assert.are.same({36,40,43}, collect_notes(PR.resolve_pattern_phrase(line, instruments)))
     end)
 
-    it("falls back to keymap when no Zxx", function()
-        local inst_with_keymap = {
-            {
-                phrases = {
-                    { mapping = { note_range_start = 36, note_range_end = 71 },
-                      lines = make_phrase({{48},{50}}).lines,
-                      number_of_lines = 2, lpb = 4, base_note = 48,
-                      key_tracking = PR.KEY_TRACKING_TRANSPOSE },
-                },
-            },
-        }
+    -- Passthrough cases: return a single line with the trigger note
+
+    it("passthrough for NOTE_OFF", function()
+        local r = PR.resolve_pattern_phrase(make_pattern_line_fx(PR.NOTE_OFF, 0, 1), instruments)
+        assert.are.equal(1, #r)
+        assert.are.equal(PR.NOTE_OFF, r[1].note_columns[1].note_value)
+    end)
+
+    it("passthrough for NOTE_EMPTY", function()
+        local r = PR.resolve_pattern_phrase(make_pattern_line_fx(PR.NOTE_EMPTY, 0, 1), instruments)
+        assert.are.equal(1, #r)
+        assert.are.equal(PR.NOTE_EMPTY, r[1].note_columns[1].note_value)
+    end)
+
+    it("passthrough when no Zxx present", function()
+        local line = { note_columns = {{ note_value = 60, instrument_value = 0 }}, effect_columns = {} }
+        local r = PR.resolve_pattern_phrase(line, instruments)
+        assert.are.equal(1, #r)
+        assert.are.equal(60, r[1].note_columns[1].note_value)
+        assert.are.equal(0,  r[1].note_columns[1].instrument_value)
+    end)
+
+    it("passthrough for Z00 (no phrase)", function()
+        local line = make_pattern_line_fx(48, 0, 0)  -- Z00 → no phrase
+        local r = PR.resolve_pattern_phrase(line, instruments)
+        assert.are.equal(1, #r)
+        assert.are.equal(48, r[1].note_columns[1].note_value)
+    end)
+
+    it("passthrough for EMPTY instrument", function()
+        local r = PR.resolve_pattern_phrase(make_pattern_line_fx(48, PR.EMPTY_INSTRUMENT, 1), instruments)
+        assert.are.equal(1, #r)
+        assert.are.equal(48, r[1].note_columns[1].note_value)
+    end)
+
+    it("passthrough when instrument index is out of range", function()
+        local r = PR.resolve_pattern_phrase(make_pattern_line_fx(48, 99, 1), instruments)
+        assert.are.equal(1, #r)
+        assert.are.equal(48, r[1].note_columns[1].note_value)
+    end)
+
+    it("passthrough when phrase index is out of range", function()
+        local r = PR.resolve_pattern_phrase(make_pattern_line_fx(48, 0, 99), instruments)
+        assert.are.equal(1, #r)
+        assert.are.equal(48, r[1].note_columns[1].note_value)
+    end)
+
+    it("passthrough when instrument has no phrases", function()
+        local empty_instruments = { { phrases = {} } }
+        local r = PR.resolve_pattern_phrase(make_pattern_line_fx(48, 0, 1), empty_instruments)
+        assert.are.equal(1, #r)
+        assert.are.equal(48, r[1].note_columns[1].note_value)
+    end)
+
+    it("passthrough preserves volume and panning", function()
         local line = {
-            note_columns = {{ note_value = 60, instrument_value = 0 }},
+            note_columns = {{
+                                note_value = 60, instrument_value = 0,
+                                volume_value = 80, panning_value = 64,
+                                delay_value = 10,
+                            }},
             effect_columns = {},
         }
-        local r = PR.resolve_pattern_phrase(line, inst_with_keymap)
-        assert.are.same({60, 62}, collect_notes(r))  -- +12 transpose
+        local r = PR.resolve_pattern_phrase(line, instruments)
+        assert.are.equal(80, r[1].note_columns[1].volume_value)
+        assert.are.equal(64, r[1].note_columns[1].panning_value)
+        assert.are.equal(10, r[1].note_columns[1].delay_value)
     end)
 
-    it("error for NOTE_OFF trigger", function()
-        local _, err = PR.resolve_pattern_phrase(make_pattern_line_fx(PR.NOTE_OFF, 0, 0), instruments)
-        assert.is_truthy(err:find("No valid trigger"))
-    end)
-
-    it("error for NOTE_EMPTY trigger", function()
-        local _, err = PR.resolve_pattern_phrase(make_pattern_line_fx(PR.NOTE_EMPTY, 0, 0), instruments)
-        assert.is_truthy(err:find("No valid trigger"))
-    end)
-
-    it("error for EMPTY instrument", function()
-        local _, err = PR.resolve_pattern_phrase(make_pattern_line_fx(48, PR.EMPTY_INSTRUMENT, 0), instruments)
-        assert.is_truthy(err:find("No instrument"))
-    end)
-
-    it("error when instrument index is out of range", function()
-        local _, err = PR.resolve_pattern_phrase(make_pattern_line_fx(48, 99, 0), instruments)
-        assert.is_truthy(err:find("not found"))
-    end)
-
-    it("error when no phrase matches", function()
-        local _, err = PR.resolve_pattern_phrase(make_pattern_line_fx(48, 0, 99), instruments)
-        assert.is_truthy(err:find("No matching phrase"))
-    end)
-
-    it("error when instrument has no phrases", function()
-        local empty_instruments = { { phrases = {} } }
-        local _, err = PR.resolve_pattern_phrase(make_pattern_line_fx(48, 0, 0), empty_instruments)
-        assert.is_truthy(err:find("no phrases"))
+    it("passthrough has time_in_beats = 0", function()
+        local line = { note_columns = {{ note_value = 60, instrument_value = 0 }}, effect_columns = {} }
+        local r = PR.resolve_pattern_phrase(line, instruments)
+        assert.are.equal(0.0, r[1].time_in_beats)
+        assert.is_nil(r[1].phrase_line_index)
+        assert.are.equal(1, r[1].output_line_index)
     end)
 
     it("passes options through", function()
-        local line = make_pattern_line_fx(48, 0, 0)
+        local line = make_pattern_line_fx(48, 0, 1)  -- Z01 → phrase 1
         local r = PR.resolve_pattern_phrase(line, instruments, { num_lines = 2 })
         assert.are.equal(2, #r)
     end)
@@ -678,7 +637,7 @@ describe("resolve_pattern_phrase", function()
             note_columns = {
                 { note_value = PR.NOTE_EMPTY, instrument_value = PR.EMPTY_INSTRUMENT },
                 { note_value = 48, instrument_value = 0,
-                  effect_number_string = "0Z", effect_amount_value = 0 },
+                  effect_number_string = "0Z", effect_amount_value = 1 },  -- Z01 → phrase 1
             },
             effect_columns = {},
         }

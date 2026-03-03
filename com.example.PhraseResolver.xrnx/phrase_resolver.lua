@@ -275,12 +275,21 @@ function M.parse_pattern_line(line, col_index)
     local result = {
         note_value = nc.note_value,
         instrument_value = nc.instrument_value,
+        volume_value = nc.volume_value,
+        panning_value = nc.panning_value,
+        delay_value = nc.delay_value,
+        effect_number_value = nc.effect_number_value,
+        effect_amount_value = nc.effect_amount_value,
         phrase_index = nil,
     }
 
     -- 1. Check the note column's own effect sub-column
     if M._is_zxx(nc.effect_number_string, nc.effect_number_value) then
-        result.phrase_index = (nc.effect_amount_value or 0)
+        local amount = nc.effect_amount_value or 0
+        if amount > 0 then
+            result.phrase_index = amount  -- Z01 → phrase 1, Z02 → phrase 2, etc.
+        end
+        -- Z00 means "no phrase" — leave phrase_index as nil
         return result
     end
 
@@ -288,7 +297,11 @@ function M.parse_pattern_line(line, col_index)
     if line.effect_columns then
         for _, fx in ipairs(line.effect_columns) do
             if M._is_zxx(fx.number_string, fx.number_value) then
-                result.phrase_index = (fx.amount_value or 0)
+                local amount = fx.amount_value or 0
+                if amount > 0 then
+                    result.phrase_index = amount  -- Z01 → phrase 1, Z02 → phrase 2, etc.
+                end
+                -- Z00 means "no phrase"
                 return result
             end
         end
@@ -298,53 +311,38 @@ function M.parse_pattern_line(line, col_index)
 end
 
 ---------------------------------------------------------------------------
--- Keymap-based phrase lookup
+-- High-level: resolve a pattern line + instruments → note sequence
 ---------------------------------------------------------------------------
 
---- Find the phrase that should play for a given note based on keymap ranges.
+--- Build a passthrough result: a single line containing just the trigger
+--- note, as if the instrument had no phrase at all.
 ---
---- Each phrase's mapping should have:
----   phrase.mapping.note_range = { start, end }  -- 1-based inclusive
----   or
----   phrase.mapping.note_range_start = N
----   phrase.mapping.note_range_end   = N
----
---- @param  note_value   integer   Trigger note (0-119)
---- @param  instrument   table     { phrases = { [1]=phrase, ... } }
---- @return table|nil, integer|nil  Matching phrase and its 1-based index, or nil
+--- @param  parsed   table   Output of parse_pattern_line
+--- @param  options  table   Options with song_lpb
+--- @return table            Single-element array of resolved lines
 
-function M.find_phrase_by_keymap(note_value, instrument)
-    if not instrument or not instrument.phrases then
-        return nil, nil
-    end
-
-    for idx, phrase in ipairs(instrument.phrases) do
-        local mapping = phrase.mapping
-        if mapping then
-            local range_start, range_end
-
-            if mapping.note_range then
-                range_start = mapping.note_range[1]
-                range_end = mapping.note_range[2]
-            else
-                range_start = mapping.note_range_start
-                range_end = mapping.note_range_end
-            end
-
-            if range_start and range_end
-                    and note_value >= range_start
-                    and note_value <= range_end then
-                return phrase, idx
-            end
-        end
-    end
-
-    return nil, nil
+function M._make_passthrough(parsed, options)
+    local song_lpb = (options and options.song_lpb) or 4
+    return {
+        {
+            note_columns = {
+                {
+                    note_value = parsed.note_value,
+                    instrument_value = parsed.instrument_value,
+                    volume_value = parsed.volume_value,
+                    panning_value = parsed.panning_value,
+                    delay_value = parsed.delay_value,
+                    effect_number_value = parsed.effect_number_value,
+                    effect_amount_value = parsed.effect_amount_value,
+                },
+            },
+            effect_columns = {},
+            phrase_line_index = nil,
+            output_line_index = 1,
+            time_in_beats = 0.0,
+        },
+    }
 end
-
----------------------------------------------------------------------------
--- High-level: resolve a pattern line + instrument → note sequence
----------------------------------------------------------------------------
 
 --- Given a pattern line and the song's instruments array, resolve the
 --- triggered phrase.
@@ -353,14 +351,15 @@ end
 --- Renoise uses 0-based instrument values in patterns but 1-based indexing
 --- in song.instruments, so we look up instruments[instrument_value + 1].
 ---
---- Supports both Zxx (program mode) and keymap-based phrase selection.
---- When a Zxx command is present, it takes priority.
---- If Z7F (127) is found, it falls back to keymap mode.
+--- When a Zxx command selects a phrase, that phrase is resolved with
+--- transposition.  In all other cases (no Zxx, Z00, instrument has no
+--- phrases, phrase index out of range, missing instrument) the function
+--- returns a passthrough — a single line with the original trigger note.
 ---
 --- @param  pattern_line  table    PatternLine-shaped table
 --- @param  instruments   table    Array of instrument tables (1-based, like song.instruments)
 --- @param  options       table?   Optional: { col_index=1, song_lpb=4, num_lines=nil }
---- @return table|nil, string?     Resolved lines, or nil + error message
+--- @return table                  Resolved lines (always returns a result)
 
 function M.resolve_pattern_phrase(pattern_line, instruments, options)
     options = options or {}
@@ -368,38 +367,35 @@ function M.resolve_pattern_phrase(pattern_line, instruments, options)
 
     local parsed = M.parse_pattern_line(pattern_line, col_index)
 
+    -- No playable note → passthrough
     if not parsed.note_value or
             parsed.note_value == M.NOTE_OFF or
             parsed.note_value == M.NOTE_EMPTY then
-        return nil, "No valid trigger note"
+        return M._make_passthrough(parsed, options)
     end
 
-    if not parsed.instrument_value or
-            parsed.instrument_value == M.EMPTY_INSTRUMENT then
-        return nil, "No instrument specified"
+    -- No Zxx phrase trigger → passthrough
+    if not parsed.phrase_index then
+        return M._make_passthrough(parsed, options)
     end
 
-    -- Renoise: pattern instrument_value is 0-based, instruments[] is 1-based
-    local instrument = instruments[parsed.instrument_value + 1]
-
-    if not instrument then
-        return nil, "Instrument " .. parsed.instrument_value .. " not found"
+    -- Look up instrument
+    local instrument
+    if parsed.instrument_value and
+            parsed.instrument_value ~= M.EMPTY_INSTRUMENT and
+            instruments then
+        instrument = instruments[parsed.instrument_value + 1]
     end
 
-    if not instrument.phrases or #instrument.phrases == 0 then
-        return nil, "Instrument has no phrases"
+    -- No instrument or no phrases → passthrough
+    if not instrument or not instrument.phrases or #instrument.phrases == 0 then
+        return M._make_passthrough(parsed, options)
     end
 
-    local phrase
-
-    if parsed.phrase_index and parsed.phrase_index ~= 0 then
-        phrase = instrument.phrases[parsed.phrase_index]
-    else
-        phrase = parsed
-    end
-
+    -- Phrase index out of range → passthrough
+    local phrase = instrument.phrases[parsed.phrase_index]
     if not phrase then
-        return nil, "No matching phrase found"
+        return M._make_passthrough(parsed, options)
     end
 
     return M.resolve_phrase(parsed.note_value, phrase, options)
