@@ -3,7 +3,7 @@
 --- Step 1: Monitor pattern line changes and print them to the scripting console.
 ---
 
--- local phrase_resolver = require("phrase_resolver")  -- for later steps
+local phrase_resolver = require("phrase_resolver")
 
 --------------------------------------------------------------------------------
 -- Notifier management
@@ -17,27 +17,28 @@ local watched_pattern_index = nil
 --- Example output: "C-4 00 80 .. 00 .... .."
 local function format_note_column(nc)
   return string.format("%s %s %s %s %s %s%s",
-    nc.note_string,
-    nc.instrument_string,
-    nc.volume_string,
-    nc.panning_string,
-    nc.delay_string,
-    nc.effect_number_string,
-    nc.effect_amount_string
+          nc.note_string,
+          nc.instrument_string,
+          nc.volume_string,
+          nc.panning_string,
+          nc.delay_string,
+          nc.effect_number_string,
+          nc.effect_amount_string
   )
 end
 
 --- Format a single EffectColumn into a readable string.
 local function format_effect_column(ec)
   return string.format("%s%s",
-    ec.number_string,
-    ec.amount_string
+          ec.number_string,
+          ec.amount_string
   )
 end
 
 --- Print the full contents of a pattern line.
-local function print_line(pos)
+local function intepret_line(pos)
   local song = renoise.song()
+  local instruments = renoise.song().instruments
 
   -- Bounds check: the pattern/track may have been deleted between
   -- the notification and the time we process it.
@@ -47,31 +48,34 @@ local function print_line(pos)
 
   local line = pattern:track(pos.track):line(pos.line)
 
-  -- Build note columns part
-  local nc_parts = {}
-  for _, nc in ipairs(line.note_columns) do
-    nc_parts[#nc_parts + 1] = format_note_column(nc)
+  local resolved, err = phrase_resolver.resolve_pattern_phrase(line, instruments)
+  if resolved == nil then
+    print(err)
+    return
   end
 
-  -- Build effect columns part
-  local fx_parts = {}
-  for _, ec in ipairs(line.effect_columns) do
-    fx_parts[#fx_parts + 1] = format_effect_column(ec)
+
+  for _, line in ipairs(resolved) do
+    local row = string.format("%3d    %-6.3f",
+            line.phrase_line_index, line.time_in_beats)
+
+    for _, col in ipairs(line.note_columns) do
+      local note_str = phrase_resolver.note_to_string(col.note_value)
+      local vol_str  = col.volume_value and col.volume_value ~= 255
+              and string.format("%3d", col.volume_value) or " .."
+      row = row .. string.format("  %-5s %s", note_str, vol_str)
+    end
+    print(row)
   end
 
-  local nc_str = table.concat(nc_parts, " | ")
-  local fx_str = table.concat(fx_parts, " | ")
 
-  print(string.format(
-    "[Pat %02d  Trk %02d  Ln %03d]  %s  ||  %s",
-    pos.pattern, pos.track, pos.line,
-    nc_str, fx_str
-  ))
+
+
 end
 
 --- The callback handed to add_line_notifier.
 local function on_line_changed(pos)
-  print_line(pos)
+  intepret_line(pos)
 end
 
 --- Attach a line notifier to the given pattern (by index).
@@ -113,6 +117,9 @@ end
 local function setup_song_notifiers()
   local song = renoise.song()
   -- Follow the currently selected pattern.
+  if song.selected_pattern_observable:has_notifier(on_selected_pattern_changed) then
+    song.selected_pattern_observable:remove_notifier(on_selected_pattern_changed)
+  end
   song.selected_pattern_observable:add_notifier(on_selected_pattern_changed)
   -- Immediately attach to the current pattern.
   attach_to_pattern(song.selected_pattern_index)
