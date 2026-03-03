@@ -1,72 +1,63 @@
 ---
 --- Phrase Resolver Tool – main.lua
---- Step 1: Monitor pattern line changes and print them to the scripting console.
 ---
 
 local phrase_resolver = require("phrase_resolver")
+
+local RES_SUFFIX = "_res"
 
 --------------------------------------------------------------------------------
 -- Notifier management
 --------------------------------------------------------------------------------
 
--- We keep a reference to the pattern we're currently watching
--- so we can remove the notifier before attaching to a new one.
 local watched_pattern_index = nil
 
---- Format a single NoteColumn into a readable string.
---- Example output: "C-4 00 80 .. 00 .... .."
-local function format_note_column(nc)
-  return string.format("%s %s %s %s %s %s%s",
-          nc.note_string,
-          nc.instrument_string,
-          nc.volume_string,
-          nc.panning_string,
-          nc.delay_string,
-          nc.effect_number_string,
-          nc.effect_amount_string
-  )
+--------------------------------------------------------------------------------
+-- Track helpers
+--------------------------------------------------------------------------------
+
+--- Check if a track name ends with the _res suffix.
+local function is_resolved_track(track_name)
+  return track_name:sub(-#RES_SUFFIX) == RES_SUFFIX
 end
 
---- Format a single EffectColumn into a readable string.
-local function format_effect_column(ec)
-  return string.format("%s%s",
-          ec.number_string,
-          ec.amount_string
-  )
-end
-
---- Print the full contents of a pattern line.
-local function intepret_line(pos)
+--- Find or create the resolved-output track for the given source track.
+--- Returns the track index of the _res track.
+local function get_or_create_res_track(source_track_idx)
   local song = renoise.song()
-  local instruments = renoise.song().instruments
+  local source_track = song:track(source_track_idx)
+  local res_name = source_track.name .. RES_SUFFIX
 
-  -- Bounds check: the pattern/track may have been deleted between
-  -- the notification and the time we process it.
-  if pos.pattern < 1 or pos.pattern > #song.patterns then return end
-  local pattern = song:pattern(pos.pattern)
-  if pos.track < 1 or pos.track > #pattern.tracks then return end
-
-  local line = pattern:track(pos.track):line(pos.line)
-
-  local resolved, err = phrase_resolver.resolve_pattern_phrase(line, instruments)
-  if resolved == nil then
-    print(err)
-    return
+  -- Look for an existing _res track right after the source.
+  for i = source_track_idx + 1, #song.tracks do
+    local t = song:track(i)
+    if t.name == res_name then
+      return i
+    end
+    if t.type ~= renoise.Track.TRACK_TYPE_SEQUENCER then
+      break
+    end
   end
 
-  local pattern_from_phrase = phrase_resolver.resolved_to_pattern_lines(resolved, renoise.song().transport.lpb)
-  local target_track_idx = pos.track + 1
+  -- Not found — insert a new track right after the source.
+  local new_idx = source_track_idx + 1
+  song:insert_track_at(new_idx)
+  song:track(new_idx).name = res_name
+  song:track(new_idx).color = source_track.color
+  print(string.format(">> Phrase Resolver: created track '%s' at index %d",
+          res_name, new_idx))
+  return new_idx
+end
 
-  -- Bounds check
-  if target_track_idx > #song.tracks then return end
+--------------------------------------------------------------------------------
+-- Writing resolved data to a track
+--------------------------------------------------------------------------------
 
-  local track = pattern:track(target_track_idx)
-  local rns_track = song:track(target_track_idx)  -- for adjusting visible columns
-
-  -- Find the max note/effect columns we need
+--- Ensure the target track has enough visible columns for the data.
+local function ensure_visible_columns(rns_track, pattern_lines)
   local max_note_cols = 0
   local max_fx_cols = 0
-  for _, pline in ipairs(pattern_from_phrase) do
+  for _, pline in ipairs(pattern_lines) do
     if #pline.note_columns > max_note_cols then
       max_note_cols = #pline.note_columns
     end
@@ -75,46 +66,105 @@ local function intepret_line(pos)
     end
   end
 
-  -- Expand visible columns if needed
   if max_note_cols > rns_track.visible_note_columns then
     rns_track.visible_note_columns = max_note_cols
   end
   if max_fx_cols > rns_track.visible_effect_columns then
     rns_track.visible_effect_columns = max_fx_cols
   end
+end
 
-  -- Write lines
-  for i, pline in ipairs(pattern_from_phrase) do
-    local line_idx = pos.line + (i - 1)
+--- Write a single PatternLine table into a real Renoise pattern line.
+local function write_pattern_line(target_line, pline)
+  for col_i, col in ipairs(pline.note_columns) do
+    local nc = target_line:note_column(col_i)
+    if col.note_value and col.note_value ~= 121 then
+      nc.note_value = col.note_value
+    end
+    if col.instrument_value and col.instrument_value ~= 255 then
+      nc.instrument_value = col.instrument_value
+    end
+    if col.volume_value and col.volume_value ~= 255 then
+      nc.volume_value = col.volume_value
+    end
+    if col.panning_value and col.panning_value ~= 255 then
+      nc.panning_value = col.panning_value
+    end
+    if col.delay_value and col.delay_value ~= 0 then
+      nc.delay_value = col.delay_value
+    end
+    if col.effect_number_value and col.effect_number_value ~= 0 then
+      nc.effect_number_value = col.effect_number_value
+    end
+    if col.effect_amount_value and col.effect_amount_value ~= 0 then
+      nc.effect_amount_value = col.effect_amount_value
+    end
+  end
+
+  for fx_i, fc in ipairs(pline.effect_columns) do
+    local ec = target_line:effect_column(fx_i)
+    if fc.number_value and fc.number_value ~= 0 then
+      ec.number_value = fc.number_value
+    end
+    if fc.amount_value and fc.amount_value ~= 0 then
+      ec.amount_value = fc.amount_value
+    end
+  end
+end
+
+--- Write an array of PatternLine tables into a pattern track,
+--- starting at the given line index.
+local function write_to_track(pattern, target_track_idx, start_line, pattern_lines)
+  local song = renoise.song()
+  local track = pattern:track(target_track_idx)
+  local rns_track = song:track(target_track_idx)
+
+  ensure_visible_columns(rns_track, pattern_lines)
+
+  for i, pline in ipairs(pattern_lines) do
+    local line_idx = start_line + (i - 1)
     if line_idx > pattern.number_of_lines then break end
 
     local target_line = track:line(line_idx)
     target_line:clear()
-
-    for col_i, col in ipairs(pline.note_columns) do
-      local nc = target_line:note_column(col_i)
-
-      nc.note_value          = col.note_value          or 121
-      nc.instrument_value    = col.instrument_value    or 255
-      nc.volume_value        = col.volume_value        or 255
-      nc.panning_value       = col.panning_value       or 255
-      nc.delay_value         = col.delay_value         or 0
-      nc.effect_number_value = col.effect_number_value or 0
-      nc.effect_amount_value = col.effect_amount_value or 0
-    end
-
-    for fx_i, fc in ipairs(pline.effect_columns) do
-      local ec = target_line:effect_column(fx_i)
-      ec.number_value = fc.number_value or 0
-      ec.amount_value = fc.amount_value or 0
-    end
+    write_pattern_line(target_line, pline)
   end
-
 end
 
---- The callback handed to add_line_notifier.
+--------------------------------------------------------------------------------
+-- Line interpretation
+--------------------------------------------------------------------------------
+
+--- Resolve a pattern line and write the result to the _res track.
+local function interpret_line(pos)
+  local song = renoise.song()
+  local instruments = song.instruments
+
+  -- Bounds check.
+  if pos.pattern < 1 or pos.pattern > #song.patterns then return end
+  local pattern = song:pattern(pos.pattern)
+  if pos.track < 1 or pos.track > #pattern.tracks then return end
+
+  -- Skip _res tracks — they are output-only.
+  if is_resolved_track(song:track(pos.track).name) then return end
+
+  local line = pattern:track(pos.track):line(pos.line)
+
+  local resolved = phrase_resolver.resolve_pattern_phrase(line, instruments)
+  local pattern_lines = phrase_resolver.resolved_to_pattern_lines(
+          resolved, song.transport.lpb
+  )
+
+  local target_idx = get_or_create_res_track(pos.track)
+  write_to_track(pattern, target_idx, pos.line, pattern_lines)
+end
+
+--------------------------------------------------------------------------------
+-- Notifier callbacks
+--------------------------------------------------------------------------------
+
 local function on_line_changed(pos)
-  intepret_line(pos)
+  interpret_line(pos)
 end
 
 --- Attach a line notifier to the given pattern (by index).
@@ -155,19 +205,14 @@ end
 
 local function setup_song_notifiers()
   local song = renoise.song()
-  -- Follow the currently selected pattern.
   if song.selected_pattern_observable:has_notifier(on_selected_pattern_changed) then
     song.selected_pattern_observable:remove_notifier(on_selected_pattern_changed)
   end
   song.selected_pattern_observable:add_notifier(on_selected_pattern_changed)
-  -- Immediately attach to the current pattern.
   attach_to_pattern(song.selected_pattern_index)
 end
 
 local function teardown_song_notifiers()
-  -- The old song (and its observables) is about to be discarded,
-  -- so Renoise will clean up notifiers automatically. But we reset
-  -- our bookkeeping.
   watched_pattern_index = nil
 end
 
@@ -175,12 +220,10 @@ end
 -- Tool entry point
 --------------------------------------------------------------------------------
 
--- React to new documents (songs) being loaded.
 renoise.tool().app_new_document_observable:add_notifier(function()
   setup_song_notifiers()
 end)
 
--- If a song is already loaded when the tool starts, attach now.
 if rawget(_G, "renoise") and renoise.song() then
   setup_song_notifiers()
 end
