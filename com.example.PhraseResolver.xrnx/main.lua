@@ -106,12 +106,10 @@ local function setup_res_track()
         song:track(group_idx).name = source_name
         song:track(group_idx).color = source_color
 
-        -- add_track_to_group places the track at the left of the group,
-        -- so the last one added ends up leftmost.
-        -- Add _res first (will be pushed right), then source (stays left).
-        song:add_track_to_group(res_idx, group_idx)
-        -- After that: source is at src_idx, group is at src_idx + 1.
-        song:add_track_to_group(src_idx, src_idx + 1)
+        -- Add source first → leftmost. After this, _res shifts to src_idx.
+        -- Add _res second → rightmost. Use src_idx again since indices shifted.
+        song:add_track_to_group(src_idx, group_idx)
+        song:add_track_to_group(src_idx, group_idx)
     end
 
     renoise.app():show_status("Phrase Resolver: set up '" .. res_name .. "'.")
