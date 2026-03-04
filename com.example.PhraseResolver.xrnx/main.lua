@@ -66,51 +66,23 @@ local function setup_res_track()
     local source_name = source_track.name
     local source_color = source_track.color
 
-    -- Already in a group? Just add the _res track inside it.
-    if source_track.group_parent then
-        -- Find the group index.
-        local group_idx
-        for i = 1, #song.tracks do
-            if song:track(i) == source_track.group_parent then
-                group_idx = i
-                break
-            end
-        end
+    -- Not in a group — create: source, _res, then group them.
+    local res_idx = src_idx + 1
+    song:insert_track_at(res_idx)
+    local res_track = song:track(res_idx)
+    res_track.name = res_name
+    res_track.color = source_color
+    res_track.mute_state = renoise.Track.MUTE_STATE_OFF
 
-        -- Insert _res right after source, then add to the same group.
-        local res_idx = src_idx + 1
-        song:insert_track_at(res_idx)
-        local res_track = song:track(res_idx)
-        res_track.name = res_name
-        res_track.color = source_color
-        res_track.mute_state = renoise.Track.MUTE_STATE_OFF
+    local group_idx = res_idx + 1
+    song:insert_group_at(group_idx)
+    song:track(group_idx).name = source_name
+    song:track(group_idx).color = source_color
 
-        -- group_idx may have shifted by 1 after the insert.
-        for i = 1, #song.tracks do
-            if song:track(i) == source_track.group_parent then
-                song:add_track_to_group(res_idx, i)
-                break
-            end
-        end
-    else
-        -- Not in a group — create: source, _res, then group them.
-        local res_idx = src_idx + 1
-        song:insert_track_at(res_idx)
-        local res_track = song:track(res_idx)
-        res_track.name = res_name
-        res_track.color = source_color
-        res_track.mute_state = renoise.Track.MUTE_STATE_OFF
-
-        local group_idx = res_idx + 1
-        song:insert_group_at(group_idx)
-        song:track(group_idx).name = source_name
-        song:track(group_idx).color = source_color
-
-        -- Add source first → leftmost. After this, _res shifts to src_idx.
-        -- Add _res second → rightmost. Use src_idx again since indices shifted.
-        song:add_track_to_group(src_idx, group_idx)
-        song:add_track_to_group(src_idx, group_idx)
-    end
+    -- Add source first → leftmost. After this, _res shifts to src_idx.
+    -- Add _res second → rightmost. Use src_idx again since indices shifted.
+    song:add_track_to_group(src_idx, group_idx)
+    song:add_track_to_group(src_idx, group_idx)
 
     renoise.app():show_status("Phrase Resolver: set up '" .. res_name .. "'.")
 end
@@ -189,7 +161,9 @@ local function write_to_track(pattern, target_track_idx, start_line, pattern_lin
 
     for i, pline in ipairs(pattern_lines) do
         local line_idx = start_line + (i - 1)
-        if line_idx > pattern.number_of_lines then break end
+        if line_idx > pattern.number_of_lines then
+            break
+        end
 
         local target_line = track:line(line_idx)
         target_line:clear()
@@ -207,18 +181,28 @@ local function interpret_line(pos)
     local instruments = song.instruments
 
     -- Bounds check.
-    if pos.pattern < 1 or pos.pattern > #song.patterns then return end
+    if pos.pattern < 1 or pos.pattern > #song.patterns then
+        return
+    end
     local pattern = song:pattern(pos.pattern)
-    if pos.track < 1 or pos.track > #pattern.tracks then return end
+    if pos.track < 1 or pos.track > #pattern.tracks then
+        return
+    end
 
     -- Skip _res tracks and non-sequencer tracks.
     local track_obj = song:track(pos.track)
-    if is_resolved_track(track_obj.name) then return end
-    if track_obj.type ~= renoise.Track.TRACK_TYPE_SEQUENCER then return end
+    if is_resolved_track(track_obj.name) then
+        return
+    end
+    if track_obj.type ~= renoise.Track.TRACK_TYPE_SEQUENCER then
+        return
+    end
 
     -- Only process if a _res track has been set up for this track.
     local res_idx = find_res_track(pos.track)
-    if not res_idx then return end
+    if not res_idx then
+        return
+    end
 
     local line = pattern:track(pos.track):line(pos.line)
 
