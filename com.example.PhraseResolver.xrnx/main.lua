@@ -91,29 +91,19 @@ end
 -- Writing resolved data to a track
 --------------------------------------------------------------------------------
 
---- Ensure the target track has enough visible columns for the data.
-local function ensure_visible_columns(rns_track, pattern_lines)
-    local max_note_cols = 0
-    local max_fx_cols = 0
-    for _, pline in ipairs(pattern_lines) do
-        if #pline.note_columns > max_note_cols then
-            max_note_cols = #pline.note_columns
-        end
-        if #pline.effect_columns > max_fx_cols then
-            max_fx_cols = #pline.effect_columns
-        end
-    end
-
-    if max_note_cols > rns_track.visible_note_columns then
-        rns_track.visible_note_columns = max_note_cols
-    end
-    if max_fx_cols > rns_track.visible_effect_columns then
-        rns_track.visible_effect_columns = max_fx_cols
-    end
-end
-
 --- Write a single PatternLine table into a real Renoise pattern line.
-local function write_pattern_line(target_line, pline)
+--- Expands visible columns on the track if needed.
+local function write_pattern_line(rns_track, target_line, pline)
+    -- Expand visible columns if this line needs more
+    local nc_count = #pline.note_columns
+    local fx_count = #pline.effect_columns
+    if nc_count > rns_track.visible_note_columns then
+        rns_track.visible_note_columns = nc_count
+    end
+    if fx_count > rns_track.visible_effect_columns then
+        rns_track.visible_effect_columns = fx_count
+    end
+
     for col_i, col in ipairs(pline.note_columns) do
         local nc = target_line:note_column(col_i)
         if col.note_value and col.note_value ~= 121 then
@@ -147,27 +137,6 @@ local function write_pattern_line(target_line, pline)
         if fc.amount_value and fc.amount_value ~= 0 then
             ec.amount_value = fc.amount_value
         end
-    end
-end
-
---- Write an array of PatternLine tables into a pattern track,
---- starting at the given line index.
-local function write_to_track(pattern, target_track_idx, start_line, pattern_lines)
-    local song = renoise.song()
-    local track = pattern:track(target_track_idx)
-    local rns_track = song:track(target_track_idx)
-
-    ensure_visible_columns(rns_track, pattern_lines)
-
-    for i, pline in ipairs(pattern_lines) do
-        local line_idx = start_line + (i - 1)
-        if line_idx > pattern.number_of_lines then
-            break
-        end
-
-        local target_line = track:line(line_idx)
-        target_line:clear()
-        write_pattern_line(target_line, pline)
     end
 end
 
@@ -320,7 +289,25 @@ local function prepare_line(pos)
     return cloned
 end
 
+--- Find the next line in the source track (after start_line) that has
+--- a note in the given column.  Searches only within the current pattern.
+--- Returns the line number, or nil if no note is found before the pattern ends.
+local function find_next_note_line(pattern, track_idx, start_line, col_index)
+    col_index = col_index or 1
+    local track = pattern:track(track_idx)
+    for ln = start_line + 1, pattern.number_of_lines do
+        local nc = track:line(ln):note_column(col_index)
+        if nc.note_value ~= phrase_resolver.NOTE_EMPTY then
+            return ln
+        end
+    end
+    return nil
+end
+
 --- Resolve a pattern line and write the result to the _res track.
+--- Pulls from the iterator until the next note in the source column
+--- or the end of the pattern. Clears remaining lines if the phrase
+--- ends early (one-shot).
 local function interpret_line(pos)
     local song = renoise.song()
 
@@ -353,12 +340,28 @@ local function interpret_line(pos)
         return
     end
 
-    local resolved = phrase_resolver.resolve_pattern_phrase(line, song.instruments)
-    local pattern_lines = phrase_resolver.resolved_to_pattern_lines(
-            resolved, song.transport.lpb
+    local song_lpb = song.transport.lpb
+    local iter = phrase_resolver.resolve_pattern_phrase(
+            line, song.instruments, { song_lpb = song_lpb }
     )
 
-    write_to_track(pattern, res_idx, pos.line, pattern_lines)
+    -- Determine how far to write: until the next note or end of pattern.
+    local next_note = find_next_note_line(pattern, pos.track, pos.line)
+    local last_line = next_note and (next_note - 1) or pattern.number_of_lines
+
+    local res_track = pattern:track(res_idx)
+    local rns_res_track = song:track(res_idx)
+
+    for ln = pos.line, last_line do
+        local target_line = res_track:line(ln)
+        target_line:clear()
+
+        local pline = iter()
+        if pline then
+            write_pattern_line(rns_res_track, target_line, pline)
+        end
+        -- If iter() returned nil (one-shot ended), the line stays cleared.
+    end
 end
 
 --------------------------------------------------------------------------------
