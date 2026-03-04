@@ -264,7 +264,8 @@ local function prepare_line(seq_pos, pos)
             pos.track, seq_pos, pos.line - 1
     )
     if not found_idx then
-        return nil
+        -- No Zxx anywhere — return the line as-is for passthrough.
+        return line
     end
 
     -- Clone and inject the found Zxx.
