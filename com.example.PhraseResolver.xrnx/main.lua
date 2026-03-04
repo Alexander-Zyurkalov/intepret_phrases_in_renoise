@@ -345,6 +345,105 @@ local function fill_res_track(iter, track_idx, res_idx, start_seq_pos, start_lin
     end
 end
 
+--- Extract non-empty overrides from the pattern note column and effect
+--- columns.  These are the values that should take priority over whatever
+--- the phrase contains.
+local function extract_overrides(line, col_index)
+    col_index = col_index or 1
+    local note_cols = line.note_columns or {}
+    local nc = note_cols[col_index] or {}
+
+    local overrides = {
+        volume_value = nil,
+        panning_value = nil,
+        effects = {}, -- array of { number_value, amount_value }
+    }
+
+    -- Volume / panning from the note column (only if explicitly set)
+    if nc.volume_value and nc.volume_value ~= phrase_resolver.EMPTY_VOLUME then
+        overrides.volume_value = nc.volume_value
+    end
+    if nc.panning_value and nc.panning_value ~= phrase_resolver.EMPTY_PANNING then
+        overrides.panning_value = nc.panning_value
+    end
+
+    -- Effect sub-column on the note column (skip Zxx — already consumed)
+    if nc.effect_number_value and nc.effect_number_value ~= phrase_resolver.EMPTY_EFFECT_NUMBER then
+        if not phrase_resolver._is_zxx(nc.effect_number_string, nc.effect_number_value) then
+            overrides.effects[#overrides.effects + 1] = {
+                number_value = nc.effect_number_value,
+                number_string = nc.effect_number_string,
+                amount_value = nc.effect_amount_value or 0,
+                amount_string = nc.effect_amount_string,
+            }
+        end
+    end
+
+    -- Effect columns on the line (skip Zxx)
+    local fx_cols = line.effect_columns or {}
+    for _, fx in ipairs(fx_cols) do
+        if fx.number_value and fx.number_value ~= phrase_resolver.EMPTY_EFFECT_NUMBER then
+            if not phrase_resolver._is_zxx(fx.number_string, fx.number_value) then
+                overrides.effects[#overrides.effects + 1] = {
+                    number_value = fx.number_value,
+                    number_string = fx.number_string,
+                    amount_value = fx.amount_value or 0,
+                    amount_string = fx.amount_string,
+                }
+            end
+        end
+    end
+
+    return overrides
+end
+
+--- Wrap a pattern_line iterator to apply pattern-level overrides.
+--- Volume and panning from the pattern replace phrase values on every
+--- yielded line.  Pattern effect columns are appended (replacing any
+--- phrase effect with the same number).
+local function apply_overrides(iter, overrides)
+    return function()
+        local pline = iter()
+        if not pline then
+            return nil
+        end
+
+        -- Override volume/panning on every note column
+        for _, nc in ipairs(pline.note_columns) do
+            if overrides.volume_value then
+                nc.volume_value = overrides.volume_value
+            end
+            if overrides.panning_value then
+                nc.panning_value = overrides.panning_value
+            end
+        end
+
+        -- Merge effects: pattern effects replace phrase effects with same
+        -- number, otherwise are appended.
+        if #overrides.effects > 0 then
+            local fx = pline.effect_columns or {}
+
+            for _, ov_fx in ipairs(overrides.effects) do
+                local replaced = false
+                for i, existing in ipairs(fx) do
+                    if existing.number_value == ov_fx.number_value then
+                        fx[i] = ov_fx
+                        replaced = true
+                        break
+                    end
+                end
+                if not replaced then
+                    fx[#fx + 1] = ov_fx
+                end
+            end
+
+            pline.effect_columns = fx
+        end
+
+        return pline
+    end
+end
+
 --- Resolve a pattern line and write the result to the _res track.
 ---
 --- Finds the "owning" note (at or before pos.line), resolves its phrase,
@@ -408,11 +507,15 @@ local function interpret_line(pos)
         return
     end
 
-    -- Create the iterator.
+    -- Extract pattern-level overrides (volume, panning, effects).
+    local overrides = extract_overrides(line)
+
+    -- Create the iterator, with overrides applied.
     local song_lpb = song.transport.lpb
     local iter = phrase_resolver.resolve_pattern_phrase(
             line, song.instruments, { song_lpb = song_lpb }
     )
+    iter = apply_overrides(iter, overrides)
 
     -- Find the next note after the owning note (across patterns).
     local stop_seq, stop_ln = find_next_note_forward(
