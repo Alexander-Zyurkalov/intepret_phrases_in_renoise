@@ -251,9 +251,8 @@ end
 -- Line interpretation
 --------------------------------------------------------------------------------
 
---- Copy a Renoise PatternLine into a plain table so we can modify it
---- without changing the actual pattern data.
-local function copy_line_to_table(line)
+--- Clone a Renoise PatternLine into a plain table.
+local function clone_line(line)
     local note_cols = {}
     for i = 1, #line.note_columns do
         local nc = line:note_column(i)
@@ -283,10 +282,47 @@ local function copy_line_to_table(line)
     return { note_columns = note_cols, effect_columns = fx_cols }
 end
 
+--- Prepare a pattern line for phrase resolution.
+--- If the line already has a Zxx, returns it as-is (the Renoise object).
+--- If not, searches backwards for a Zxx and returns a cloned copy
+--- with the found Zxx injected into effect column 1.
+--- Returns the (possibly modified) line, or nil if no Zxx found anywhere.
+local function prepare_line(pos)
+    local song = renoise.song()
+    local pattern = song:pattern(pos.pattern)
+    local line = pattern:track(pos.track):line(pos.line)
+
+    -- Check if the current line already has a Zxx.
+    local parsed = phrase_resolver.parse_pattern_line(line)
+    if parsed.phrase_index then
+        return line
+    end
+
+    -- Search backwards for a Zxx.
+    local found_idx = find_active_phrase_index(
+            pos.pattern, pos.track, pos.line - 1
+    )
+    if not found_idx then
+        return nil
+    end
+
+    -- Clone and inject the found Zxx.
+    local cloned = clone_line(line)
+    cloned.effect_columns[1] = {
+        number_value = phrase_resolver.encode_effect_string(
+                phrase_resolver.ZXX_EFFECT_STRING
+        ),
+        number_string = phrase_resolver.ZXX_EFFECT_STRING,
+        amount_value = found_idx,
+        amount_string = string.format("%02X", found_idx),
+    }
+
+    return cloned
+end
+
 --- Resolve a pattern line and write the result to the _res track.
 local function interpret_line(pos)
     local song = renoise.song()
-    local instruments = song.instruments
 
     -- Bounds check.
     if pos.pattern < 1 or pos.pattern > #song.patterns then
@@ -312,26 +348,12 @@ local function interpret_line(pos)
         return
     end
 
-    local line = pattern:track(pos.track):line(pos.line)
-
-    -- Find the active Zxx — on this line or earlier.
-    local found_idx = find_active_phrase_index(
-            pos.pattern, pos.track, pos.line
-    )
-    if found_idx then
-        -- Inject the Zxx into a copy of the line.
-        line = copy_line_to_table(line)
-        line.effect_columns[1] = {
-            number_value = phrase_resolver.encode_effect_string(
-                    phrase_resolver.ZXX_EFFECT_STRING
-            ),
-            number_string = phrase_resolver.ZXX_EFFECT_STRING,
-            amount_value = found_idx,
-            amount_string = string.format("%02X", found_idx),
-        }
+    local line = prepare_line(pos)
+    if not line then
+        return
     end
 
-    local resolved = phrase_resolver.resolve_pattern_phrase(line, instruments)
+    local resolved = phrase_resolver.resolve_pattern_phrase(line, song.instruments)
     local pattern_lines = phrase_resolver.resolved_to_pattern_lines(
             resolved, song.transport.lpb
     )
