@@ -253,14 +253,16 @@ end
 ---------------------------------------------------------------------------
 
 --- Wrap a phrase iterator and yield one PatternLine-shaped table per song
---- line.  Each call advances by one song line offset (0, 1, 2, …).
+--- line offset (0, 1, 2, …).
 ---
---- When multiple phrase lines fall on the same song line (phrase LPB >
---- song LPB), their note columns are placed side by side and sub-line
---- timing is encoded in the delay column.
+--- Phrase lines are placed on the correct song-grid position based on
+--- their time_in_beats and the song LPB.  When a phrase line falls
+--- between song lines, it is placed on the nearest song line with a
+--- delay value.  If multiple phrase lines map to the same song line,
+--- only the first is kept (no extra columns are created).
 ---
 --- Returns nil when the phrase is exhausted (one-shot finished).
---- Returns an empty PatternLine for gap lines between notes.
+--- Returns an empty PatternLine for gap lines with no phrase content.
 --- For looping phrases the iterator never returns nil.
 ---
 --- @param  phrase_iter  function  Iterator from resolve_phrase_iter
@@ -282,6 +284,7 @@ function M.pattern_line_iter(phrase_iter, song_lpb)
         current_offset = current_offset + 1
         local note_cols = {}
         local fx_cols = {}
+        local placed = false
 
         while true do
             -- Get the next phrase line if we don't have one buffered
@@ -306,13 +309,13 @@ function M.pattern_line_iter(phrase_iter, song_lpb)
                 offset = offset + 1
             end
 
-            -- This phrase line belongs to a future song line — stop collecting
+            -- This phrase line belongs to a future song line — stop
             if offset > current_offset then
                 break
             end
 
-            if offset == current_offset then
-                -- Append non-empty note columns
+            if offset == current_offset and not placed then
+                -- Take only the first phrase line for this song line
                 for _, col in ipairs(pending.note_columns or {}) do
                     if not M.is_note_column_empty(col) then
                         note_cols[#note_cols + 1] = {
@@ -320,14 +323,13 @@ function M.pattern_line_iter(phrase_iter, song_lpb)
                             instrument_value = col.instrument_value,
                             volume_value = col.volume_value,
                             panning_value = col.panning_value,
-                            delay_value = delay,
+                            delay_value = (delay > 0) and delay or (col.delay_value or 0),
                             effect_number_value = col.effect_number_value,
                             effect_amount_value = col.effect_amount_value,
                         }
                     end
                 end
 
-                -- Append non-empty effect columns
                 for _, fc in ipairs(pending.effect_columns or {}) do
                     if not M.is_effect_column_empty(fc) then
                         fx_cols[#fx_cols + 1] = {
@@ -338,14 +340,16 @@ function M.pattern_line_iter(phrase_iter, song_lpb)
                         }
                     end
                 end
+
+                placed = true
             end
-            -- offset < current_offset: skip (shouldn't happen normally)
+            -- Skip additional phrase lines for the same offset, or past offsets
 
             pending = nil  -- consumed
         end
 
         -- Nothing for this offset and phrase is done → signal end
-        if #note_cols == 0 and #fx_cols == 0 and exhausted and not pending then
+        if not placed and exhausted and not pending then
             return nil
         end
 
