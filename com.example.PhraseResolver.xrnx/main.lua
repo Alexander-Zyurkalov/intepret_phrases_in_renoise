@@ -289,18 +289,39 @@ local function prepare_line(pos)
     return cloned
 end
 
---- Find the line at or before start_line (in the current pattern) that
---- has a note in the given column.  Returns the line number, or nil.
-local function find_note_at_or_before(pattern, track_idx, start_line, col_index)
+--- Find the line at or before start_line that has a note in the given
+--- column.  Searches backwards across the sequencer if nothing is found
+--- in the current pattern.
+--- Returns (seq_pos, line_number) or (nil, nil).
+local function find_note_at_or_before(track_idx, start_seq_pos, start_line, col_index)
     col_index = col_index or 1
-    local track = pattern:track(track_idx)
-    for ln = start_line, 1, -1 do
-        local nc = track:line(ln):note_column(col_index)
-        if nc.note_value ~= phrase_resolver.NOTE_EMPTY then
-            return ln
+    local song = renoise.song()
+    local seq = song.sequencer.pattern_sequence
+
+    local current_line = start_line
+
+    for sp = start_seq_pos, 1, -1 do
+        local pat = song:pattern(seq[sp])
+        if track_idx <= #pat.tracks then
+            local track = pat:track(track_idx)
+            if current_line > pat.number_of_lines then
+                current_line = pat.number_of_lines
+            end
+            for ln = current_line, 1, -1 do
+                local nc = track:line(ln):note_column(col_index)
+                if nc.note_value ~= phrase_resolver.NOTE_EMPTY then
+                    return sp, ln
+                end
+            end
+        end
+        -- Move to end of previous pattern.
+        if sp > 1 then
+            local prev_pat = song:pattern(seq[sp - 1])
+            current_line = prev_pat.number_of_lines
         end
     end
-    return nil
+
+    return nil, nil
 end
 
 --- Find the next note after start_line, searching forward across the
@@ -399,19 +420,6 @@ local function interpret_line(pos)
         return
     end
 
-    -- Find the owning note: the most recent note at or before pos.line.
-    local owning_line = find_note_at_or_before(pattern, pos.track, pos.line)
-    if not owning_line then
-        return
-    end
-
-    -- Prepare the owning line (inject Zxx from backwards search if needed).
-    local owning_pos = { pattern = pos.pattern, track = pos.track, line = owning_line }
-    local line = prepare_line(owning_pos)
-    if not line then
-        return
-    end
-
     -- Find this pattern's position in the sequencer.
     local seq = song.sequencer.pattern_sequence
     local seq_pos = nil
@@ -425,6 +433,23 @@ local function interpret_line(pos)
         return
     end
 
+    -- Find the owning note: the most recent note at or before pos.line,
+    -- searching backwards across patterns.
+    local owning_seq, owning_line = find_note_at_or_before(
+            pos.track, seq_pos, pos.line
+    )
+    if not owning_seq then
+        return
+    end
+
+    -- Prepare the owning line (inject Zxx from backwards search if needed).
+    local owning_pat_idx = seq[owning_seq]
+    local owning_pos = { pattern = owning_pat_idx, track = pos.track, line = owning_line }
+    local line = prepare_line(owning_pos)
+    if not line then
+        return
+    end
+
     -- Create the iterator.
     local song_lpb = song.transport.lpb
     local iter = phrase_resolver.resolve_pattern_phrase(
@@ -433,12 +458,12 @@ local function interpret_line(pos)
 
     -- Find the next note after the owning note (across patterns).
     local stop_seq, stop_ln = find_next_note_forward(
-            pos.track, seq_pos, owning_line
+            pos.track, owning_seq, owning_line
     )
 
     -- Fill from the owning note forward.
     fill_res_track(iter, pos.track, res_idx,
-            seq_pos, owning_line, stop_seq, stop_ln)
+            owning_seq, owning_line, stop_seq, stop_ln)
 end
 
 --------------------------------------------------------------------------------
