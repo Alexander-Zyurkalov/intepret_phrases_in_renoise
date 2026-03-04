@@ -172,8 +172,116 @@ local function write_to_track(pattern, target_track_idx, start_line, pattern_lin
 end
 
 --------------------------------------------------------------------------------
+-- Backwards Zxx search
+--------------------------------------------------------------------------------
+
+--- Scan backwards from a given position to find the most recent Zxx command
+--- for the given track/column. Searches through the current pattern and then
+--- backwards through the sequencer into previous patterns.
+---
+--- @param  pattern_idx  number  Current pattern index
+--- @param  track_idx    number  Track to scan
+--- @param  start_line   number  Line to start scanning from (inclusive)
+--- @param  col_index    number? Note column to inspect (default 1)
+--- @return number|nil           phrase_index (1-based), or nil if not found
+
+local function find_active_phrase_index(pattern_idx, track_idx, start_line, col_index)
+    col_index = col_index or 1
+    local song = renoise.song()
+    local seq = song.sequencer.pattern_sequence
+
+    -- Find the sequence position(s) for this pattern_idx.
+    -- Start from the last occurrence in the sequence so we search backwards
+    -- through the correct ordering.
+    local seq_pos = nil
+    for i = #seq, 1, -1 do
+        if seq[i] == pattern_idx then
+            seq_pos = i
+            break
+        end
+    end
+    if not seq_pos then
+        return nil
+    end
+
+    -- Scan: current pattern from start_line backwards, then previous patterns.
+    local current_seq_pos = seq_pos
+    local current_line = start_line
+
+    while current_seq_pos >= 1 do
+        local pat_idx = seq[current_seq_pos]
+        local pattern = song:pattern(pat_idx)
+
+        if track_idx > #pattern.tracks then
+            -- Track doesn't exist in this pattern, skip.
+            current_seq_pos = current_seq_pos - 1
+            if current_seq_pos >= 1 then
+                local prev_pat = song:pattern(seq[current_seq_pos])
+                current_line = prev_pat.number_of_lines
+            end
+        else
+            local track = pattern:track(track_idx)
+
+            -- Clamp start line to pattern length.
+            if current_line > pattern.number_of_lines then
+                current_line = pattern.number_of_lines
+            end
+
+            for ln = current_line, 1, -1 do
+                local line = track:line(ln)
+                local parsed = phrase_resolver.parse_pattern_line(line, col_index)
+                if parsed.phrase_index then
+                    return parsed.phrase_index
+                end
+            end
+
+            -- Not found in this pattern — move to the previous one.
+            current_seq_pos = current_seq_pos - 1
+            if current_seq_pos >= 1 then
+                local prev_pat = song:pattern(seq[current_seq_pos])
+                current_line = prev_pat.number_of_lines
+            end
+        end
+    end
+
+    return nil
+end
+
+--------------------------------------------------------------------------------
 -- Line interpretation
 --------------------------------------------------------------------------------
+
+--- Copy a Renoise PatternLine into a plain table so we can modify it
+--- without changing the actual pattern data.
+local function copy_line_to_table(line)
+    local note_cols = {}
+    for i = 1, #line.note_columns do
+        local nc = line:note_column(i)
+        note_cols[i] = {
+            note_value = nc.note_value,
+            instrument_value = nc.instrument_value,
+            volume_value = nc.volume_value,
+            panning_value = nc.panning_value,
+            delay_value = nc.delay_value,
+            effect_number_value = nc.effect_number_value,
+            effect_number_string = nc.effect_number_string,
+            effect_amount_value = nc.effect_amount_value,
+        }
+    end
+
+    local fx_cols = {}
+    for i = 1, #line.effect_columns do
+        local ec = line:effect_column(i)
+        fx_cols[i] = {
+            number_value = ec.number_value,
+            number_string = ec.number_string,
+            amount_value = ec.amount_value,
+            amount_string = ec.amount_string,
+        }
+    end
+
+    return { note_columns = note_cols, effect_columns = fx_cols }
+end
 
 --- Resolve a pattern line and write the result to the _res track.
 local function interpret_line(pos)
@@ -205,6 +313,23 @@ local function interpret_line(pos)
     end
 
     local line = pattern:track(pos.track):line(pos.line)
+
+    -- Find the active Zxx — on this line or earlier.
+    local found_idx = find_active_phrase_index(
+            pos.pattern, pos.track, pos.line
+    )
+    if found_idx then
+        -- Inject the Zxx into a copy of the line.
+        line = copy_line_to_table(line)
+        line.effect_columns[1] = {
+            number_value = phrase_resolver.encode_effect_string(
+                    phrase_resolver.ZXX_EFFECT_STRING
+            ),
+            number_string = phrase_resolver.ZXX_EFFECT_STRING,
+            amount_value = found_idx,
+            amount_string = string.format("%02X", found_idx),
+        }
+    end
 
     local resolved = phrase_resolver.resolve_pattern_phrase(line, instruments)
     local pattern_lines = phrase_resolver.resolved_to_pattern_lines(
