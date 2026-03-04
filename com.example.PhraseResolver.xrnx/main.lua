@@ -141,79 +141,71 @@ local function write_pattern_line(rns_track, target_line, pline)
 end
 
 --------------------------------------------------------------------------------
--- Backwards Zxx search
+-- Backwards scanning
 --------------------------------------------------------------------------------
 
---- Scan backwards from a given position to find the most recent Zxx command
---- for the given track/column. Searches through the current pattern and then
---- backwards through the sequencer into previous patterns.
----
---- @param  pattern_idx  number  Current pattern index
---- @param  track_idx    number  Track to scan
---- @param  start_line   number  Line to start scanning from (inclusive)
---- @param  col_index    number? Note column to inspect (default 1)
---- @return number|nil           phrase_index (1-based), or nil if not found
-
-local function find_active_phrase_index(pattern_idx, track_idx, start_line, col_index)
-    col_index = col_index or 1
+--- Generic backwards scan across the sequencer.
+--- Calls predicate(track, line_index) for each line going backwards from
+--- (start_seq_pos, start_line).  When the predicate returns a non-nil
+--- value, scanning stops and (seq_pos, line_number, value) is returned.
+--- Returns (nil, nil, nil) if nothing matches.
+local function scan_backwards(track_idx, start_seq_pos, start_line, predicate)
     local song = renoise.song()
     local seq = song.sequencer.pattern_sequence
-
-    -- Find the sequence position(s) for this pattern_idx.
-    -- Start from the last occurrence in the sequence so we search backwards
-    -- through the correct ordering.
-    local seq_pos = nil
-    for i = #seq, 1, -1 do
-        if seq[i] == pattern_idx then
-            seq_pos = i
-            break
-        end
-    end
-    if not seq_pos then
-        return nil
-    end
-
-    -- Scan: current pattern from start_line backwards, then previous patterns.
-    local current_seq_pos = seq_pos
     local current_line = start_line
 
-    while current_seq_pos >= 1 do
-        local pat_idx = seq[current_seq_pos]
-        local pattern = song:pattern(pat_idx)
-
-        if track_idx > #pattern.tracks then
-            -- Track doesn't exist in this pattern, skip.
-            current_seq_pos = current_seq_pos - 1
-            if current_seq_pos >= 1 then
-                local prev_pat = song:pattern(seq[current_seq_pos])
-                current_line = prev_pat.number_of_lines
+    for sp = start_seq_pos, 1, -1 do
+        local pat = song:pattern(seq[sp])
+        if track_idx <= #pat.tracks then
+            local track = pat:track(track_idx)
+            if current_line > pat.number_of_lines then
+                current_line = pat.number_of_lines
             end
-        else
-            local track = pattern:track(track_idx)
-
-            -- Clamp start line to pattern length.
-            if current_line > pattern.number_of_lines then
-                current_line = pattern.number_of_lines
-            end
-
             for ln = current_line, 1, -1 do
-                local line = track:line(ln)
-                local parsed = phrase_resolver.parse_pattern_line(line, col_index)
-                if parsed.phrase_index then
-                    return parsed.phrase_index
+                local result = predicate(track, ln)
+                if result ~= nil then
+                    return sp, ln, result
                 end
             end
-
-            -- Not found in this pattern — move to the previous one.
-            current_seq_pos = current_seq_pos - 1
-            if current_seq_pos >= 1 then
-                local prev_pat = song:pattern(seq[current_seq_pos])
-                current_line = prev_pat.number_of_lines
-            end
+        end
+        -- Move to end of previous pattern.
+        if sp > 1 then
+            current_line = song:pattern(seq[sp - 1]).number_of_lines
         end
     end
 
-    return nil
+    return nil, nil, nil
+end
+
+--- Find the most recent Zxx command at or before (start_seq_pos, start_line).
+--- Returns the phrase_index (1-based), or nil.
+local function find_active_phrase_index(track_idx, start_seq_pos, start_line, col_index)
+    col_index = col_index or 1
+    local _, _, phrase_index = scan_backwards(
+            track_idx, start_seq_pos, start_line,
+            function(track, ln)
+                local parsed = phrase_resolver.parse_pattern_line(track:line(ln), col_index)
+                return parsed.phrase_index  -- non-nil when Zxx found
+            end
+    )
+    return phrase_index
+end
+
+--- Find the most recent note at or before (start_seq_pos, start_line).
+--- Returns (seq_pos, line_number) or (nil, nil).
+local function find_note_at_or_before(track_idx, start_seq_pos, start_line, col_index)
+    col_index = col_index or 1
+    local sp, ln, _ = scan_backwards(
+            track_idx, start_seq_pos, start_line,
+            function(track, line_num)
+                local nc = track:line(line_num):note_column(col_index)
+                if nc.note_value ~= phrase_resolver.NOTE_EMPTY then
+                    return true
+                end
+                return nil  -- keep scanning
+            end
+    )
+    return sp, ln
 end
 
 --------------------------------------------------------------------------------
@@ -256,7 +248,7 @@ end
 --- If not, searches backwards for a Zxx and returns a cloned copy
 --- with the found Zxx injected into effect column 1.
 --- Returns the (possibly modified) line, or nil if no Zxx found anywhere.
-local function prepare_line(pos)
+local function prepare_line(seq_pos, pos)
     local song = renoise.song()
     local pattern = song:pattern(pos.pattern)
     local line = pattern:track(pos.track):line(pos.line)
@@ -267,9 +259,9 @@ local function prepare_line(pos)
         return line
     end
 
-    -- Search backwards for a Zxx.
+    -- Search backwards for a Zxx (across patterns).
     local found_idx = find_active_phrase_index(
-            pos.pattern, pos.track, pos.line - 1
+            pos.track, seq_pos, pos.line - 1
     )
     if not found_idx then
         return nil
@@ -287,41 +279,6 @@ local function prepare_line(pos)
     }
 
     return cloned
-end
-
---- Find the line at or before start_line that has a note in the given
---- column.  Searches backwards across the sequencer if nothing is found
---- in the current pattern.
---- Returns (seq_pos, line_number) or (nil, nil).
-local function find_note_at_or_before(track_idx, start_seq_pos, start_line, col_index)
-    col_index = col_index or 1
-    local song = renoise.song()
-    local seq = song.sequencer.pattern_sequence
-
-    local current_line = start_line
-
-    for sp = start_seq_pos, 1, -1 do
-        local pat = song:pattern(seq[sp])
-        if track_idx <= #pat.tracks then
-            local track = pat:track(track_idx)
-            if current_line > pat.number_of_lines then
-                current_line = pat.number_of_lines
-            end
-            for ln = current_line, 1, -1 do
-                local nc = track:line(ln):note_column(col_index)
-                if nc.note_value ~= phrase_resolver.NOTE_EMPTY then
-                    return sp, ln
-                end
-            end
-        end
-        -- Move to end of previous pattern.
-        if sp > 1 then
-            local prev_pat = song:pattern(seq[sp - 1])
-            current_line = prev_pat.number_of_lines
-        end
-    end
-
-    return nil, nil
 end
 
 --- Find the next note after start_line, searching forward across the
@@ -445,7 +402,7 @@ local function interpret_line(pos)
     -- Prepare the owning line (inject Zxx from backwards search if needed).
     local owning_pat_idx = seq[owning_seq]
     local owning_pos = { pattern = owning_pat_idx, track = pos.track, line = owning_line }
-    local line = prepare_line(owning_pos)
+    local line = prepare_line(owning_seq, owning_pos)
     if not line then
         return
     end
