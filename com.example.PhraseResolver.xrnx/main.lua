@@ -563,6 +563,13 @@ end
 
 --- Called whenever selected_pattern_observable fires.
 local function on_selected_pattern_changed()
+    local song = renoise.song()
+    local pos = {
+        pattern = song.selected_pattern_index,
+        track = song.selected_track_index,
+        line = 1
+    }
+    interpret_line(pos)
     local idx = renoise.song().selected_pattern_index
     attach_to_pattern(idx)
 end
@@ -601,9 +608,5 @@ renoise.tool():add_menu_entry {
 renoise.tool().app_new_document_observable:add_notifier(function()
     setup_song_notifiers()
 end)
-
-if rawget(_G, "renoise") and renoise.song() then
-    setup_song_notifiers()
-end
 
 print(">> Phrase Resolver tool loaded.")
