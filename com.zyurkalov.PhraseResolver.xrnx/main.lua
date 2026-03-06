@@ -432,7 +432,6 @@ local function apply_overrides(iter, overrides)
         local isThereANote = false
         -- Override instrument/volume/panning on every note column
         for _, nc in ipairs(pline.note_columns) do
-            print("nc.note_value = ", nc.note_value)
             local note_off = 120
             if nc.note_value == note_off then
                 goto continue
