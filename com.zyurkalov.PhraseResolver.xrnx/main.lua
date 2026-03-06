@@ -354,10 +354,16 @@ local function extract_overrides(line, col_index)
     local nc = note_cols[col_index] or {}
 
     local overrides = {
+        instrument_value = nil,
         volume_value = nil,
         panning_value = nil,
-        effects = {}, -- array of { number_value, amount_value }
+        effects = {}, -- array of { number_value, amount_value, ... }
     }
+
+    -- Instrument from the note column (always copy if present)
+    if nc.instrument_value and nc.instrument_value ~= phrase_resolver.EMPTY_INSTRUMENT then
+        overrides.instrument_value = nc.instrument_value
+    end
 
     -- Volume / panning from the note column (only if explicitly set)
     if nc.volume_value and nc.volume_value ~= phrase_resolver.EMPTY_VOLUME then
@@ -397,10 +403,25 @@ local function extract_overrides(line, col_index)
     return overrides
 end
 
+--- Build a Z00 effect column table.
+local function make_z00_effect()
+    return {
+        number_value = phrase_resolver.encode_effect_string(
+                phrase_resolver.ZXX_EFFECT_STRING
+        ),
+        number_string = phrase_resolver.ZXX_EFFECT_STRING,
+        amount_value = 0,
+        amount_string = "00",
+    }
+end
+
 --- Wrap a pattern_line iterator to apply pattern-level overrides.
---- Volume and panning from the pattern replace phrase values on every
---- yielded line.  Pattern effect columns are appended (replacing any
---- phrase effect with the same number).
+--- - Instrument from the pattern is set on every note column.
+--- - Volume and panning from the pattern replace phrase values.
+--- - Pattern effect columns replace phrase effects with the same number,
+---   or are appended.
+--- - A Z00 effect is added to every line so the _res track plays raw
+---   notes without triggering phrases.
 local function apply_overrides(iter, overrides)
     return function()
         local pline = iter()
@@ -408,37 +429,54 @@ local function apply_overrides(iter, overrides)
             return nil
         end
 
-        -- Override volume/panning on every note column
+        local isThereANote = false
+        -- Override instrument/volume/panning on every note column
         for _, nc in ipairs(pline.note_columns) do
+            print("nc.note_value = ", nc.note_value)
+            local note_off = 120
+            if nc.note_value == note_off then
+                goto continue
+            end
+            if nc.instrument_value then
+                isThereANote = true
+            end
+            if overrides.instrument_value then
+                nc.instrument_value = overrides.instrument_value
+            end
             if overrides.volume_value then
                 nc.volume_value = overrides.volume_value
             end
             if overrides.panning_value then
                 nc.panning_value = overrides.panning_value
             end
+            ::continue::
         end
 
         -- Merge effects: pattern effects replace phrase effects with same
         -- number, otherwise are appended.
-        if #overrides.effects > 0 then
-            local fx = pline.effect_columns or {}
+        local fx = pline.effect_columns or {}
 
-            for _, ov_fx in ipairs(overrides.effects) do
-                local replaced = false
-                for i, existing in ipairs(fx) do
-                    if existing.number_value == ov_fx.number_value then
-                        fx[i] = ov_fx
-                        replaced = true
-                        break
-                    end
-                end
-                if not replaced then
-                    fx[#fx + 1] = ov_fx
+        for _, ov_fx in ipairs(overrides.effects) do
+            local replaced = false
+            for i, existing in ipairs(fx) do
+                if existing.number_value == ov_fx.number_value then
+                    fx[i] = ov_fx
+                    replaced = true
+                    break
                 end
             end
-
-            pline.effect_columns = fx
+            if not replaced then
+                fx[#fx + 1] = ov_fx
+            end
         end
+
+        -- Always add Z00 to disable phrase playback on the _res track.
+
+        if isThereANote then
+            fx[#fx + 1] = make_z00_effect()
+        end
+
+        pline.effect_columns = fx
 
         return pline
     end
@@ -608,5 +646,4 @@ renoise.tool():add_menu_entry {
 renoise.tool().app_new_document_observable:add_notifier(function()
     setup_song_notifiers()
 end)
-
 print(">> Phrase Resolver tool loaded.")
