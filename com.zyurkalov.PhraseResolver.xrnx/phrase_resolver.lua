@@ -14,6 +14,34 @@
 ---   renoise.PatternLine → { note_columns = {...}, effect_columns = {...} }
 ---------------------------------------------------------------------------
 
+--- @class PhraseResolverModule
+--- @field NOTE_OFF number
+--- @field NOTE_EMPTY number
+--- @field EMPTY_INSTRUMENT number
+--- @field EMPTY_VOLUME number
+--- @field EMPTY_PANNING number
+--- @field EMPTY_DELAY number
+--- @field EMPTY_EFFECT_NUMBER number
+--- @field EMPTY_EFFECT_AMOUNT number
+--- @field DEFAULT_BASE_NOTE number
+--- @field KEY_TRACKING_NONE number
+--- @field KEY_TRACKING_TRANSPOSE number
+--- @field KEY_TRACKING_OFFSET number
+--- @field ZXX_EFFECT_STRING string
+--- @field _zxx_number_value number
+
+--- @alias NoteColumnTable { note_value: number?, instrument_value: number?, volume_value: number?, panning_value: number?, delay_value: number?, effect_number_value: number?, effect_number_string: string?, effect_amount_value: number?, effect_amount_string: string? }
+--- @alias EffectColumnTable { number_value: number?, number_string: string?, amount_value: number?, amount_string: string? }
+--- @alias PatternLineTable { note_columns: NoteColumnTable[]?, effect_columns: EffectColumnTable[]? }
+--- @alias ResolvedPhraseLine { note_columns: NoteColumnTable[], effect_columns: EffectColumnTable[], phrase_line_index: number, output_line_index: number, time_in_beats: number }
+--- @alias PhraseLineIterator fun(): ResolvedPhraseLine?
+--- @alias PatternLineIterator fun(): PatternLineTable?
+--- @alias ParsedPatternLine { note_value: number?, instrument_value: number?, volume_value: number?, panning_value: number?, delay_value: number?, effect_number_value: number?, effect_amount_value: number?, phrase_index: number? }
+--- @alias PhraseData { lines: PatternLineTable[], number_of_lines: number, base_note: number?, key_tracking: number?, lpb: number?, looping: boolean?, loop_start: number?, loop_end: number? }
+--- @alias InstrumentData { phrases: PhraseData[]? }
+--- @alias ResolveOptions { col_index: number?, song_lpb: number? }
+
+--- @type PhraseResolverModule
 local M = {}
 
 ---------------------------------------------------------------------------
@@ -81,6 +109,8 @@ M._zxx_number_value = M.encode_effect_string(M.ZXX_EFFECT_STRING)
 ---------------------------------------------------------------------------
 
 --- Check if a note column table contains any actual data.
+--- @param col NoteColumnTable?
+--- @return boolean
 function M.is_note_column_empty(col)
     if not col then
         return true
@@ -111,6 +141,8 @@ function M.is_note_column_empty(col)
 end
 
 --- Check if an effect column table contains any actual data.
+--- @param col EffectColumnTable?
+--- @return boolean
 function M.is_effect_column_empty(col)
     if not col then
         return true
@@ -128,6 +160,9 @@ end
 -- Internal: transpose a single note value
 ---------------------------------------------------------------------------
 
+--- @param note_value number
+--- @param semitones number
+--- @return number
 function M._transpose_note(note_value, semitones)
     if note_value == M.NOTE_OFF or note_value == M.NOTE_EMPTY then
         return note_value
@@ -150,10 +185,10 @@ end
 ---   { note_columns, effect_columns, phrase_line_index,
 ---     output_line_index, time_in_beats }
 ---
---- @param trigger_note  number   MIDI-style note 0-119
---- @param phrase        table    Phrase data
---- @param options       table?   { song_lpb = 4 }
---- @return function              Iterator function
+--- @param trigger_note  number         MIDI-style note 0-119
+--- @param phrase        PhraseData      Phrase data
+--- @param options       ResolveOptions? { song_lpb = 4 }
+--- @return PhraseLineIterator           Iterator function
 
 function M.resolve_phrase_iter(trigger_note, phrase, options)
     options = options or {}
@@ -265,9 +300,9 @@ end
 --- Returns an empty PatternLine for gap lines with no phrase content.
 --- For looping phrases the iterator never returns nil.
 ---
---- @param  phrase_iter  function  Iterator from resolve_phrase_iter
---- @param  song_lpb     number   The song's lines-per-beat
---- @return function               Iterator yielding PatternLine tables
+--- @param  phrase_iter  PhraseLineIterator  Iterator from resolve_phrase_iter
+--- @param  song_lpb     number?            The song's lines-per-beat
+--- @return PatternLineIterator              Iterator yielding PatternLine tables
 
 function M.pattern_line_iter(phrase_iter, song_lpb)
     song_lpb = song_lpb or 4
@@ -367,10 +402,10 @@ end
 ---   1. The specified note column's own effect sub-column
 ---   2. The line's effect columns
 ---
---- @param  line        table    PatternLine-shaped table
+--- @param  line        renoise.PatternLine|PatternLineTable  PatternLine-shaped table
 --- @param  col_index   number?  Note column to inspect (default 1)
---- @return table                { note_value, instrument_value, …,
----                                phrase_index (1-based) or nil }
+--- @return ParsedPatternLine     { note_value, instrument_value, …,
+---                                 phrase_index (1-based) or nil }
 
 function M.parse_pattern_line(line, col_index)
     col_index = col_index or 1
@@ -420,6 +455,9 @@ end
 
 --- Build a passthrough iterator: yields one line with just the trigger
 --- note, then stops.
+--- @param parsed ParsedPatternLine
+--- @param song_lpb number?
+--- @return PatternLineIterator
 function M._passthrough_iter(parsed, song_lpb)
     song_lpb = song_lpb or 4
     local done = false
@@ -453,10 +491,10 @@ end
 --- transposition.  In all other cases the function returns a passthrough
 --- iterator yielding one line with the original trigger note.
 ---
---- @param  pattern_line  table    PatternLine-shaped table
---- @param  instruments   table    Array of instrument tables (1-based)
---- @param  options       table?   { col_index=1, song_lpb=4 }
---- @return function               Iterator yielding PatternLine tables
+--- @param  pattern_line  renoise.PatternLine|PatternLineTable  PatternLine-shaped table
+--- @param  instruments   InstrumentData[]  Array of instrument tables (1-based)
+--- @param  options       ResolveOptions?   { col_index=1, song_lpb=4 }
+--- @return PatternLineIterator             Iterator yielding PatternLine tables
 
 function M.resolve_pattern_phrase(pattern_line, instruments, options)
     options = options or {}
@@ -507,8 +545,8 @@ end
 --- Strip instrument values and 0Zxx effects from a pattern line,
 --- producing a phrase-line-shaped table.
 ---
---- @param  pattern_line  table  PatternLine-shaped table
---- @return table                Phrase-line-shaped table
+--- @param  pattern_line  PatternLineTable  PatternLine-shaped table
+--- @return PatternLineTable               Phrase-line-shaped table
 
 function M._build_phrase_line(pattern_line)
     local note_cols = {}
@@ -566,10 +604,10 @@ end
 --- Both tracks are plain arrays of PatternLine-shaped tables, indexed
 --- 1-based, walked from start_line to the end of the shorter track.
 ---
---- @param  trigger_track  table    Array of PatternLine tables (trigger)
---- @param  resolved_track table    Array of PatternLine tables (resolved)
---- @param  start_line     number?  First line to read (default 1)
---- @return function                Iterator yielding PatternLine tables
+--- @param  trigger_track  PatternLineTable[]  Array of PatternLine tables (trigger)
+--- @param  resolved_track PatternLineTable[]  Array of PatternLine tables (resolved)
+--- @param  start_line     number?            First line to read (default 1)
+--- @return PatternLineIterator                Iterator yielding PatternLine tables
 
 function M.resolved_track_iter(trigger_track, resolved_track, start_line)
     start_line = start_line or 1
@@ -634,10 +672,10 @@ end
 --- since they are pattern-level concepts and have no meaning inside a
 --- phrase.
 ---
---- @param  iter     function  Iterator yielding PatternLine-shaped tables
---- @param  options  table?    { song_lpb = 4 }
---- @return table|nil          Phrase table compatible with resolve_phrase_iter,
----                            or nil when the iterator yields nothing
+--- @param  iter     PatternLineIterator  Iterator yielding PatternLine-shaped tables
+--- @param  options  ResolveOptions?     { song_lpb = 4 }
+--- @return PhraseData?                  Phrase table compatible with resolve_phrase_iter,
+---                                      or nil when the iterator yields nothing
 
 function M.build_phrase_from_iter(iter, options)
     options = options or {}
@@ -675,6 +713,8 @@ end
 -- Utility helpers
 ---------------------------------------------------------------------------
 
+--- @param note_value number
+--- @return string
 function M.note_to_string(note_value)
     if note_value == M.NOTE_OFF then
         return "OFF"
@@ -692,6 +732,8 @@ function M.note_to_string(note_value)
     return name .. octave
 end
 
+--- @param s string
+--- @return number?
 function M.string_to_note(s)
     if s == "OFF" then
         return M.NOTE_OFF
@@ -713,4 +755,5 @@ function M.string_to_note(s)
     return octave * 12 + map[name]
 end
 
+--- @return PhraseResolverModule
 return M

@@ -10,6 +10,7 @@ local RES_SUFFIX = "_res"
 -- Notifier management
 --------------------------------------------------------------------------------
 
+--- @type number?
 local watched_pattern_index = nil
 
 --------------------------------------------------------------------------------
@@ -17,13 +18,16 @@ local watched_pattern_index = nil
 --------------------------------------------------------------------------------
 
 --- Check if a track name ends with the _res suffix.
+--- @param track_name string
+--- @return boolean
 local function is_resolved_track(track_name)
     return track_name:sub(-#RES_SUFFIX) == RES_SUFFIX
 end
 
 --- Find the source track for a given _res track (by name).
 --- Returns the track index, or nil if not found.
---- @return renoise.Track
+--- @param res_track_idx number
+--- @return number?
 local function find_resource_track(res_track_idx)
     local song = renoise.song()
     local res_track = song:track(res_track_idx)
@@ -48,6 +52,7 @@ end
 --- Set up a _res track + group for the currently selected track.
 --- Called from the menu — safe to insert tracks here because
 --- we're not inside a notifier callback.
+--- @return nil
 local function setup_res_track()
     local song = renoise.song()
     local src_idx = song.selected_track_index
@@ -102,6 +107,9 @@ end
 
 --- Write a single PatternLine table into a real Renoise pattern line.
 --- Expands visible columns on the track if needed.
+--- @param rns_track renoise.Track
+--- @param target_line renoise.PatternLine
+--- @param pline ClonedLine
 local function write_pattern_line(rns_track, target_line, pline)
     -- Expand visible columns if this line needs more
     local nc_count = #pline.note_columns
@@ -158,6 +166,13 @@ end
 --- (start_seq_pos, start_line).  When the predicate returns a non-nil
 --- value, scanning stops and (seq_pos, line_number, value) is returned.
 --- Returns (nil, nil, nil) if nothing matches.
+--- @param track_idx number
+--- @param start_seq_pos number
+--- @param start_line number
+--- @param predicate fun(track: renoise.PatternTrack, ln: number): any?
+--- @return number? seq_pos
+--- @return number? line_number
+--- @return any? value
 local function scan_backwards(track_idx, start_seq_pos, start_line, predicate)
     local song = renoise.song()
     local seq = song.sequencer.pattern_sequence
@@ -188,6 +203,11 @@ end
 
 --- Find the most recent Zxx command at or before (start_seq_pos, start_line).
 --- Returns the phrase_index (1-based), or nil.
+--- @param track_idx number
+--- @param start_seq_pos number
+--- @param start_line number
+--- @param col_index? number
+--- @return number? phrase_index
 local function find_active_phrase_index(track_idx, start_seq_pos, start_line, col_index)
     col_index = col_index or 1
     local _, _, phrase_index = scan_backwards(
@@ -202,6 +222,12 @@ end
 
 --- Find the most recent note at or before (start_seq_pos, start_line).
 --- Returns (seq_pos, line_number) or (nil, nil).
+--- @param track_idx number
+--- @param start_seq_pos number
+--- @param start_line number
+--- @param col_index? number
+--- @return number? seq_pos
+--- @return number? line_number
 local function find_note_at_or_before(track_idx, start_seq_pos, start_line, col_index)
     col_index = col_index or 1
     local sp, ln, _ = scan_backwards(
@@ -222,6 +248,8 @@ end
 --------------------------------------------------------------------------------
 
 --- Clone a Renoise PatternLine into a plain table.
+--- @param line renoise.PatternLine
+--- @return ClonedLine
 local function clone_line(line)
     local note_cols = {}
     for i = 1, #line.note_columns do
@@ -257,6 +285,9 @@ end
 --- If not, searches backwards for a Zxx and returns a cloned copy
 --- with the found Zxx injected into effect column 1.
 --- Returns the (possibly modified) line, or nil if no Zxx found anywhere.
+--- @param seq_pos number
+--- @param pos PatternLinePosition
+--- @return renoise.PatternLine|ClonedLine|nil
 local function prepare_line(seq_pos, pos)
     local song = renoise.song()
     local pattern = song:pattern(pos.pattern)
@@ -293,6 +324,12 @@ end
 
 --- Find the next note after start_line, searching forward across the
 --- sequencer.  Returns (seq_pos, line_number) or (nil, nil).
+--- @param track_idx number
+--- @param start_seq_pos number
+--- @param start_line number
+--- @param col_index? number
+--- @return number? seq_pos
+--- @return number? line_number
 local function find_next_note_forward(track_idx, start_seq_pos, start_line, col_index)
     col_index = col_index or 1
     local song = renoise.song()
@@ -319,6 +356,13 @@ end
 --- position and line, up to (but not including) a stop position.
 --- stop_seq_pos/stop_line can be nil to mean end of song.
 --- Clears lines where the iterator is exhausted (one-shot ended).
+--- @param iter PatternLineIterator
+--- @param track_idx number
+--- @param res_idx number
+--- @param start_seq_pos number
+--- @param start_line number
+--- @param stop_seq_pos number?
+--- @param stop_line number?
 local function fill_res_track(iter, track_idx, res_idx, start_seq_pos, start_line,
                               stop_seq_pos, stop_line)
     local song = renoise.song()
@@ -357,6 +401,9 @@ end
 --- Extract non-empty overrides from the pattern note column and effect
 --- columns.  These are the values that should take priority over whatever
 --- the phrase contains.
+--- @param line renoise.PatternLine
+--- @param col_index? number
+--- @return renoise.PatternLine
 local function extract_overrides(line, col_index)
     col_index = col_index or 1
     local note_cols = line.note_columns or {}
@@ -413,6 +460,7 @@ local function extract_overrides(line, col_index)
 end
 
 --- Build a Z00 effect column table.
+--- @return renoise.EffectColumn
 local function make_z00_effect()
     return {
         number_value = phrase_resolver.encode_effect_string(
@@ -431,6 +479,9 @@ end
 ---   or are appended.
 --- - A Z00 effect is added to every line so the _res track plays raw
 ---   notes without triggering phrases.
+--- @param iter PatternLineIterator
+--- @param overrides renoise.PatternLine
+--- @return PatternLineIterator
 local function apply_overrides(iter, overrides)
     return function()
         local pline = iter()
@@ -490,6 +541,8 @@ local function apply_overrides(iter, overrides)
     end
 end
 
+--- @param pos PatternLinePosition
+--- @return number? seq_pos
 local function find_sequence_position(pos)
     local song = renoise.song()
     local seq = song.sequencer.pattern_sequence
@@ -504,13 +557,14 @@ local function find_sequence_position(pos)
 end
 --- Handle a change on a _res track.
 --- (Stub — not yet implemented.)
+--- @param pos PatternLinePosition
 local function interpret_line_from_resolved(pos)
     -- Find this pattern's position in the sequencer.
     local seq_pos = find_sequence_position(pos)
     if not seq_pos then
         return
     end
-    
+
     local resource_track = find_resource_track(pos)
     if not resource_track then
         return
@@ -526,10 +580,11 @@ end
 --- and fills forward across patterns until the next note or the end of
 --- the song.  When a note is deleted, this re-extends the previous note's
 --- phrase to cover the gap.
+--- @param pos PatternLinePosition
 local function interpret_line_from_trigger_track(pos)
 
     -- Find this pattern's position in the sequencer.
-    local seq_pos = find_sequence_position(pos) 
+    local seq_pos = find_sequence_position(pos)
     if not seq_pos then
         return
     end
@@ -572,6 +627,7 @@ local function interpret_line_from_trigger_track(pos)
 end
 
 --- Dispatch a line change to the appropriate handler.
+--- @param pos PatternLinePosition
 local function interpret_line(pos)
     local song = renoise.song()
 
@@ -601,12 +657,13 @@ end
 --------------------------------------------------------------------------------
 
 --- react on line changed
---- @param pos renoise.PatternLinePosition
+--- @param pos PatternLinePosition
 local function on_line_changed(pos)
     interpret_line(pos)
 end
 
 --- Attach a line notifier to the given pattern (by index).
+--- @param pat_idx number
 local function attach_to_pattern(pat_idx)
     local song = renoise.song()
 
@@ -633,6 +690,7 @@ local function attach_to_pattern(pat_idx)
 end
 
 --- Called whenever selected_pattern_observable fires.
+--- @return nil
 local function on_selected_pattern_changed()
     local song = renoise.song()
     local pos = {
@@ -649,6 +707,7 @@ end
 -- Song lifecycle
 --------------------------------------------------------------------------------
 
+--- @return nil
 local function setup_song_notifiers()
     local song = renoise.song()
     if song.selected_pattern_observable:has_notifier(on_selected_pattern_changed) then
@@ -658,6 +717,7 @@ local function setup_song_notifiers()
     attach_to_pattern(song.selected_pattern_index)
 end
 
+--- @return nil
 local function teardown_song_notifiers()
     watched_pattern_index = nil
 end
