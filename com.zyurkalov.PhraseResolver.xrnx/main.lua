@@ -13,6 +13,10 @@ local RES_SUFFIX = "_res"
 --- @type number?
 local watched_pattern_index = nil
 
+--- When true, local line notifiers are suppressed (global rebuild in progress).
+--- @type boolean
+local rebuilding_globally = false
+
 --------------------------------------------------------------------------------
 -- Track helpers
 --------------------------------------------------------------------------------
@@ -766,6 +770,9 @@ end
 --- react on line changed
 --- @param pos PatternLinePosition
 local function on_line_changed(pos)
+    if rebuilding_globally then
+        return
+    end
     interpret_line(pos)
 end
 
@@ -830,33 +837,19 @@ local function teardown_song_notifiers()
 end
 
 --------------------------------------------------------------------------------
--- Rebuild current phrase
+-- Rebuild phrase
 --------------------------------------------------------------------------------
 
---- Rebuild _res tracks for notes that use the currently selected phrase.
+--- Rebuild _res tracks for all notes that use a specific phrase.
+--- Sets the global flag to suppress local notifiers while writing.
+--- @param inst_idx number  1-based instrument index
+--- @param phrase_idx number  1-based phrase index
 --- @return nil
-local function rebuild_current_phrase()
+local function rebuild_phrase(inst_idx, phrase_idx)
     local song = renoise.song()
-
-    -- If standing on a _res track, move selection to the source track
-    -- to prevent the notifier from firing recursively.
-    local sel_track = song:track(song.selected_track_index)
-    if is_resolved_track(sel_track.name) then
-        local src_idx = find_resource_track(song.selected_track_index)
-        if src_idx then
-            song.selected_track_index = src_idx
-        end
-    end
-
-    local inst_idx = song.selected_instrument_index
-    local phrase_idx = song.selected_phrase_index
-
-    if not phrase_idx or phrase_idx < 1 then
-        renoise.app():show_status("Phrase Resolver: no phrase selected.")
-        return
-    end
-
     local seq = song.sequencer.pattern_sequence
+
+    rebuilding_globally = true
 
     for t = 1, #song.tracks do
         local track_obj = song:track(t)
@@ -910,6 +903,23 @@ local function rebuild_current_phrase()
 
         ::next_track::
     end
+
+    rebuilding_globally = false
+end
+
+--- Action: rebuild the currently selected phrase.
+--- @return nil
+local function rebuild_current_phrase()
+    local song = renoise.song()
+    local inst_idx = song.selected_instrument_index
+    local phrase_idx = song.selected_phrase_index
+
+    if not phrase_idx or phrase_idx < 1 then
+        renoise.app():show_status("Phrase Resolver: no phrase selected.")
+        return
+    end
+
+    rebuild_phrase(inst_idx, phrase_idx)
 
     renoise.app():show_status(string.format(
             "Phrase Resolver: rebuilt phrase %d of instrument %d.",
