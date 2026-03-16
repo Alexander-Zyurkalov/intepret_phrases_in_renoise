@@ -49,6 +49,24 @@ local function find_resource_track(res_track_idx)
     return nil
 end
 
+
+--- Find the _res track for a given source track (by name).
+--- Returns the track index, or nil if not found.
+--- @param source_track_idx number
+--- @return number?
+local function find_res_track(source_track_idx)
+    local song = renoise.song()
+    local res_name = song:track(source_track_idx).name .. RES_SUFFIX
+
+    for i = 1, #song.tracks do
+        if song:track(i).name == res_name then
+            return i
+        end
+    end
+
+    return nil
+end
+
 --- Set up a _res track + group for the currently selected track.
 --- Called from the menu — safe to insert tracks here because
 --- we're not inside a notifier callback.
@@ -569,9 +587,10 @@ local function interpret_line_from_resolved(pos)
     if not resource_track then
         return
     end
-    local owning_seq, onwning_line = find_note_at_or_before(
+    local owning_seq, owning_line = find_note_at_or_before(
             resource_track, seq_pos, pos.line
     )
+    phrase_resolver.resolved_track_iter(resource_track, pos.track, owning_line)
 end
 
 --- Handle a change on an original (source) track.
@@ -582,6 +601,12 @@ end
 --- phrase to cover the gap.
 --- @param pos PatternLinePosition
 local function interpret_line_from_trigger_track(pos)
+    local song = renoise.song()
+
+    local res_idx = find_res_track(pos.track)
+    if not res_idx then
+        return
+    end
 
     -- Find this pattern's position in the sequencer.
     local seq_pos = find_sequence_position(pos)
@@ -599,6 +624,7 @@ local function interpret_line_from_trigger_track(pos)
     end
 
     -- Prepare the owning line (inject Zxx from backwards search if needed).
+    local seq = song.sequencer.pattern_sequence
     local owning_pat_idx = seq[owning_seq]
     local owning_pos = { pattern = owning_pat_idx, track = pos.track, line = owning_line }
     local line = prepare_line(owning_seq, owning_pos)
@@ -646,7 +672,7 @@ local function interpret_line(pos)
     end
 
     if is_resolved_track(track_obj.name) then
-        interpret_line_from_resolved(pos)
+        --interpret_line_from_resolved(pos)
     else
         interpret_line_from_trigger_track(pos)
     end
