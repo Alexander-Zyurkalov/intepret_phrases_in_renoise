@@ -830,6 +830,83 @@ local function teardown_song_notifiers()
 end
 
 --------------------------------------------------------------------------------
+-- Rebuild current phrase
+--------------------------------------------------------------------------------
+
+--- Rebuild _res tracks for notes that use the currently selected phrase.
+--- @return nil
+local function rebuild_current_phrase()
+    local song = renoise.song()
+    local inst_idx = song.selected_instrument_index
+    local phrase_idx = song.selected_phrase_index
+
+    if not phrase_idx or phrase_idx < 1 then
+        renoise.app():show_status("Phrase Resolver: no phrase selected.")
+        return
+    end
+
+    local seq = song.sequencer.pattern_sequence
+
+    for t = 1, #song.tracks do
+        local track_obj = song:track(t)
+        if track_obj.type ~= renoise.Track.TRACK_TYPE_SEQUENCER then
+            goto next_track
+        end
+        if is_resolved_track(track_obj.name) then
+            goto next_track
+        end
+        if not find_res_track(t) then
+            goto next_track
+        end
+
+        do
+            local active_zxx = nil
+
+            for sp = 1, #seq do
+                local pat_idx = seq[sp]
+                local pat = song:pattern(pat_idx)
+                if t > #pat.tracks then
+                    goto next_seq
+                end
+
+                local pat_track = pat:track(t)
+                for ln = 1, pat.number_of_lines do
+                    local line = pat_track:line(ln)
+
+                    local parsed = phrase_resolver.parse_pattern_line(line)
+                    if parsed.phrase_index then
+                        active_zxx = parsed.phrase_index
+                    end
+
+                    local nc = line:note_column(1)
+                    if nc.note_value ~= phrase_resolver.NOTE_EMPTY
+                            and nc.note_value ~= 120
+                            and active_zxx == phrase_idx then
+                        local instr = nc.instrument_value
+                        if instr ~= 255 and (instr + 1) == inst_idx then
+                            interpret_line_from_source_track({
+                                pattern = pat_idx,
+                                track = t,
+                                line = ln,
+                            })
+                        end
+                    end
+                end
+
+                ::next_seq::
+            end
+        end
+
+        ::next_track::
+    end
+
+    renoise.app():show_status(string.format(
+            "Phrase Resolver: rebuilt phrase %d of instrument %d.",
+            phrase_idx, inst_idx
+    ))
+end
+
+--------------------------------------------------------------------------------
 -- Tool entry point
 --------------------------------------------------------------------------------
 
@@ -841,6 +918,21 @@ renoise.tool():add_menu_entry {
 renoise.tool():add_menu_entry {
     name = "Pattern Editor:Phrase Resolver:Set Up Resolve Track",
     invoke = setup_res_track,
+}
+
+renoise.tool():add_menu_entry {
+    name = "Main Menu:Tools:Phrase Resolver:Rebuild Current Phrase",
+    invoke = rebuild_current_phrase,
+}
+
+renoise.tool():add_menu_entry {
+    name = "Pattern Editor:Phrase Resolver:Rebuild Current Phrase",
+    invoke = rebuild_current_phrase,
+}
+
+renoise.tool():add_keybinding {
+    name = "Global:Tools:Rebuild Current Phrase [Phrase Resolver]",
+    invoke = rebuild_current_phrase,
 }
 
 renoise.tool().app_new_document_observable:add_notifier(function()
