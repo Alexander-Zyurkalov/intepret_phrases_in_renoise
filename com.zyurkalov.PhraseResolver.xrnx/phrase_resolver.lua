@@ -501,6 +501,177 @@ function M.resolve_pattern_phrase(pattern_line, instruments, options)
 end
 
 ---------------------------------------------------------------------------
+-- Internal: build a single phrase line from a pattern line
+---------------------------------------------------------------------------
+
+--- Strip instrument values and 0Zxx effects from a pattern line,
+--- producing a phrase-line-shaped table.
+---
+--- @param  pattern_line  table  PatternLine-shaped table
+--- @return table                Phrase-line-shaped table
+
+function M._build_phrase_line(pattern_line)
+    local note_cols = {}
+    for i, col in ipairs(pattern_line.note_columns or {}) do
+        local eff_num = col.effect_number_value
+        local eff_amt = col.effect_amount_value
+        -- Strip 0Zxx from note column effect sub-column
+        if M._is_zxx(col.effect_number_string, col.effect_number_value) then
+            eff_num = M.EMPTY_EFFECT_NUMBER
+            eff_amt = M.EMPTY_EFFECT_AMOUNT
+        end
+        note_cols[i] = {
+            note_value = col.note_value,
+            instrument_value = M.EMPTY_INSTRUMENT,
+            volume_value = col.volume_value,
+            panning_value = col.panning_value,
+            delay_value = col.delay_value,
+            effect_number_value = eff_num,
+            effect_amount_value = eff_amt,
+        }
+    end
+
+    local fx_cols = {}
+    for _, fx in ipairs(pattern_line.effect_columns or {}) do
+        -- Skip 0Zxx effect columns entirely
+        if not M._is_zxx(fx.number_string, fx.number_value) then
+            fx_cols[#fx_cols + 1] = {
+                number_value = fx.number_value,
+                number_string = fx.number_string,
+                amount_value = fx.amount_value,
+                amount_string = fx.amount_string,
+            }
+        end
+    end
+
+    return { note_columns = note_cols, effect_columns = fx_cols }
+end
+
+---------------------------------------------------------------------------
+-- Iterator builder: two tracks → note sequence
+---------------------------------------------------------------------------
+
+--- Build an iterator that walks two pattern tracks in parallel and
+--- yields lines from the resolved track until the trigger track signals
+--- the end of the current note.
+---
+--- On the very first line the trigger track's note is treated as the
+--- initiating note.  The iterator yields the corresponding resolved
+--- line and keeps going while the trigger track has NOTE_EMPTY lines.
+--- It stops (returns nil) as soon as the trigger track contains:
+---   • NOTE_OFF  — the resolved line is yielded, then the iterator ends
+---   • a new real note (0-119) — the iterator ends WITHOUT yielding
+---     that line (it belongs to the next phrase)
+---
+--- Both tracks are plain arrays of PatternLine-shaped tables, indexed
+--- 1-based, walked from start_line to the end of the shorter track.
+---
+--- @param  trigger_track  table    Array of PatternLine tables (trigger)
+--- @param  resolved_track table    Array of PatternLine tables (resolved)
+--- @param  start_line     number?  First line to read (default 1)
+--- @return function                Iterator yielding PatternLine tables
+
+function M.resolved_track_iter(trigger_track, resolved_track, start_line)
+    start_line = start_line or 1
+
+    local idx = start_line
+    local total = math.min(#trigger_track, #resolved_track)
+    local first = true
+    local finished = false
+
+    return function()
+        if finished or idx > total then
+            return nil
+        end
+
+        local trig_line = trigger_track[idx]
+        local res_line = resolved_track[idx]
+        local first_col = ((trig_line.note_columns or {})[1])
+        local nv = first_col and first_col.note_value
+
+        if first then
+            -- First line: accept whatever is there as the trigger
+            first = false
+            idx = idx + 1
+            return res_line
+        end
+
+        -- Subsequent lines: check the trigger track
+        if nv and nv ~= M.NOTE_EMPTY then
+            if nv == M.NOTE_OFF then
+                -- Include the OFF line, then stop
+                finished = true
+                idx = idx + 1
+                return res_line
+            end
+            -- New real note → don't include, stop
+            finished = true
+            return nil
+        end
+
+        -- NOTE_EMPTY or no note column → keep going
+        idx = idx + 1
+        return res_line
+    end
+end
+
+---------------------------------------------------------------------------
+-- High-level: pattern line iterator → phrase
+---------------------------------------------------------------------------
+
+--- Consume a pattern-line iterator and build a phrase table.
+---
+--- This is the inverse of resolve_pattern_phrase: it reads resolved
+--- pattern lines (one per song line) and packs them into a phrase
+--- structure that resolve_phrase_iter can play back.
+---
+--- The iterator is consumed until the first note column yields either
+--- NOTE_OFF or a new note (0-119).  An OFF line is included in the
+--- phrase (it terminates the sound); a new-note line is NOT included
+--- (it belongs to the next phrase).
+---
+--- Instrument values and 0Zxx effects are stripped from the output,
+--- since they are pattern-level concepts and have no meaning inside a
+--- phrase.
+---
+--- @param  iter     function  Iterator yielding PatternLine-shaped tables
+--- @param  options  table?    { song_lpb = 4 }
+--- @return table|nil          Phrase table compatible with resolve_phrase_iter,
+---                            or nil when the iterator yields nothing
+
+function M.build_phrase_from_iter(iter, options)
+    options = options or {}
+    local song_lpb = options.song_lpb or 4
+
+    local lines = {}
+    local base_note = nil
+
+    while true do
+        local line = iter()
+        if not line then
+            break
+        end
+
+        lines[#lines + 1] = M._build_phrase_line(line)
+    end
+
+    if #lines == 0 then
+        return nil
+    end
+
+    return {
+        lines = lines,
+        number_of_lines = #lines,
+        base_note = base_note or M.DEFAULT_BASE_NOTE,
+        key_tracking = M.KEY_TRACKING_TRANSPOSE,
+        lpb = song_lpb,
+        looping = false,
+        loop_start = 1,
+        loop_end = #lines,
+    }
+end
+
+---------------------------------------------------------------------------
 -- Utility helpers
 ---------------------------------------------------------------------------
 

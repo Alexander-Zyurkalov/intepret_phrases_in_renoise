@@ -21,14 +21,23 @@ local function is_resolved_track(track_name)
     return track_name:sub(-#RES_SUFFIX) == RES_SUFFIX
 end
 
---- Find the _res track for a given source track (by name).
+--- Find the source track for a given _res track (by name).
 --- Returns the track index, or nil if not found.
-local function find_res_track(source_track_idx)
+--- @return renoise.Track
+local function find_resource_track(res_track_idx)
     local song = renoise.song()
-    local res_name = song:track(source_track_idx).name .. RES_SUFFIX
+    local res_track = song:track(res_track_idx)
+    local res_name = res_track.name
+
+    -- Remove the _res suffix to get the source track name
+    if not is_resolved_track(res_name) then
+        return nil
+    end
+
+    local source_name = res_name:sub(1, -#RES_SUFFIX - 1)
 
     for i = 1, #song.tracks do
-        if song:track(i).name == res_name then
+        if song:track(i).name == source_name then
             return i
         end
     end
@@ -481,40 +490,8 @@ local function apply_overrides(iter, overrides)
     end
 end
 
---- Resolve a pattern line and write the result to the _res track.
----
---- Finds the "owning" note (at or before pos.line), resolves its phrase,
---- and fills forward across patterns until the next note or the end of
---- the song.  When a note is deleted, this re-extends the previous note's
---- phrase to cover the gap.
-local function interpret_line(pos)
+local function find_sequence_position(pos)
     local song = renoise.song()
-
-    -- Bounds check.
-    if pos.pattern < 1 or pos.pattern > #song.patterns then
-        return
-    end
-    local pattern = song:pattern(pos.pattern)
-    if pos.track < 1 or pos.track > #pattern.tracks then
-        return
-    end
-
-    -- Skip _res tracks and non-sequencer tracks.
-    local track_obj = song:track(pos.track)
-    if is_resolved_track(track_obj.name) then
-        return
-    end
-    if track_obj.type ~= renoise.Track.TRACK_TYPE_SEQUENCER then
-        return
-    end
-
-    -- Only process if a _res track has been set up for this track.
-    local res_idx = find_res_track(pos.track)
-    if not res_idx then
-        return
-    end
-
-    -- Find this pattern's position in the sequencer.
     local seq = song.sequencer.pattern_sequence
     local seq_pos = nil
     for i = #seq, 1, -1 do
@@ -523,6 +500,36 @@ local function interpret_line(pos)
             break
         end
     end
+    return seq_pos
+end
+--- Handle a change on a _res track.
+--- (Stub — not yet implemented.)
+local function interpret_line_from_resolved(pos)
+    -- Find this pattern's position in the sequencer.
+    local seq_pos = find_sequence_position(pos)
+    if not seq_pos then
+        return
+    end
+    
+    local resource_track = find_resource_track(pos)
+    if not resource_track then
+        return
+    end
+    local owning_seq, onwning_line = find_note_at_or_before(
+            resource_track, seq_pos, pos.line
+    )
+end
+
+--- Handle a change on an original (source) track.
+---
+--- Finds the "owning" note (at or before pos.line), resolves its phrase,
+--- and fills forward across patterns until the next note or the end of
+--- the song.  When a note is deleted, this re-extends the previous note's
+--- phrase to cover the gap.
+local function interpret_line_from_trigger_track(pos)
+
+    -- Find this pattern's position in the sequencer.
+    local seq_pos = find_sequence_position(pos) 
     if not seq_pos then
         return
     end
@@ -564,10 +571,37 @@ local function interpret_line(pos)
             owning_seq, owning_line, stop_seq, stop_ln)
 end
 
+--- Dispatch a line change to the appropriate handler.
+local function interpret_line(pos)
+    local song = renoise.song()
+
+    -- Bounds check.
+    if pos.pattern < 1 or pos.pattern > #song.patterns then
+        return
+    end
+    local pattern = song:pattern(pos.pattern)
+    if pos.track < 1 or pos.track > #pattern.tracks then
+        return
+    end
+
+    local track_obj = song:track(pos.track)
+    if track_obj.type ~= renoise.Track.TRACK_TYPE_SEQUENCER then
+        return
+    end
+
+    if is_resolved_track(track_obj.name) then
+        interpret_line_from_resolved(pos)
+    else
+        interpret_line_from_trigger_track(pos)
+    end
+end
+
 --------------------------------------------------------------------------------
 -- Notifier callbacks
 --------------------------------------------------------------------------------
 
+--- react on line changed
+--- @param pos renoise.PatternLinePosition
 local function on_line_changed(pos)
     interpret_line(pos)
 end
