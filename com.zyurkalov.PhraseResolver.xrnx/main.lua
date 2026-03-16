@@ -650,6 +650,8 @@ local function interpret_line_from_resolved(pos)
     end
     total_lines = total_lines + pos.line
 
+    -- TODO: fix tests, check whether start loop is not 1
+    -- TODO: update velocity and effects
     local phrase_index = find_active_phrase_index(
             resource_track, seq_pos, pos.line
     )
