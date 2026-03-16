@@ -308,7 +308,7 @@ end
 --- @param seq_pos number
 --- @param pos PatternLinePosition
 --- @return renoise.PatternLine|nil
-local function prepare_line(seq_pos, pos)
+local function prepare_pattern_line(seq_pos, pos)
     local song = renoise.song()
     local pattern = song:pattern(pos.pattern)
     local line = pattern:track(pos.track):line(pos.line)
@@ -514,7 +514,8 @@ local function apply_overrides(iter, overrides)
         for _, nc in ipairs(pline.note_columns) do
             local note_off = 120
             if nc.note_value == note_off then
-                goto continue
+                goto
+                continue
             end
             if nc.instrument_value then
                 isThereANote = true
@@ -528,7 +529,7 @@ local function apply_overrides(iter, overrides)
             if overrides.panning_value then
                 nc.panning_value = overrides.panning_value
             end
-            ::continue::
+            :: continue ::
         end
 
         -- Merge effects: pattern effects replace phrase effects with same
@@ -579,6 +580,10 @@ end
 --- (Stub — not yet implemented.)
 --- @param pos PatternLinePosition
 local function interpret_line_from_resolved(pos)
+    local song = renoise.song()
+    local pattern = song:pattern(pos.pattern)
+    local line = pattern:track(pos.track):line(pos.line)
+
     -- Find this pattern's position in the sequencer.
     local seq_pos = find_sequence_position(pos)
     if not seq_pos then
@@ -592,11 +597,64 @@ local function interpret_line_from_resolved(pos)
     local owning_seq, owning_line = find_note_at_or_before(
             resource_track, seq_pos, pos.line
     )
+    local total_lines = 0
+    for seq_num = owning_seq, seq_pos - 1, 1 do
+        local pattern_num = song.sequencer.pattern_sequence[seq_num]
+        total_lines = total_lines + song.patterns[pattern_num].number_of_lines
+    end
+    total_lines = total_lines + pos.line
 
-    print("Owning_line = ", owning_line)
+    local phrase_index = find_active_phrase_index(
+            resource_track, seq_pos, pos.line
+    )
+    if not phrase_index then
+        print("No phrase")
+        return
+    end
 
-    --local iter = phrase_resolver.resolved_track_iter(resource_track, pos.track, owning_line)
-    --local phrase = phrase_resolver.build_phrase_from_iter(iter, )
+    --- @type renoise.InstrumentPhrase
+    local phrase = song.instruments[1].phrases[phrase_index]
+    local song_lpb = song.transport.lpb
+
+    local phrase_line_number = phrase_resolver.phrase_line_from_pattern_offset(total_lines, phrase, song_lpb)
+    if not phrase_line_number then
+        print("No phrase line")
+    end
+    local phrase_line = phrase_resolver.build_phrase_line(line)
+    for col_i, col in ipairs(phrase_line.note_columns) do
+        local nc = phrase.lines[phrase_line_number]:note_column(col_i)
+        if col.note_value then
+            nc.note_value = col.note_value
+        end
+        if col.instrument_value then
+            nc.instrument_value = col.instrument_value
+        end
+        if col.volume_value then
+            nc.volume_value = col.volume_value
+        end
+        if col.panning_value then
+            nc.panning_value = col.panning_value
+        end
+        if col.delay_value then
+            nc.delay_value = col.delay_value
+        end
+        if col.effect_number_value then
+            nc.effect_number_value = col.effect_number_value
+        end
+        if col.effect_amount_value then
+            nc.effect_amount_value = col.effect_amount_value
+        end
+    end
+
+    for fx_i, fc in ipairs(phrase_line.effect_columns) do
+        local ec = phrase.lines[phrase_line_number]:effect_column(fx_i)
+        if fc.number_value then
+            ec.number_value = fc.number_value
+        end
+        if fc.amount_value then
+            ec.amount_value = fc.amount_value
+        end
+    end
 
 end
 
@@ -634,7 +692,7 @@ local function interpret_line_from_source_track(pos)
     local seq = song.sequencer.pattern_sequence
     local owning_pat_idx = seq[owning_seq]
     local owning_pos = { pattern = owning_pat_idx, track = pos.track, line = owning_line }
-    local line = prepare_line(owning_seq, owning_pos)
+    local line = prepare_pattern_line(owning_seq, owning_pos)
     if not line then
         return
     end

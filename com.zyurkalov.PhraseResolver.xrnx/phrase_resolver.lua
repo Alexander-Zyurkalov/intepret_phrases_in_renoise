@@ -548,7 +548,7 @@ end
 --- @param  pattern_line  PatternLineTable  PatternLine-shaped table
 --- @return PatternLineTable               Phrase-line-shaped table
 
-function M._build_phrase_line(pattern_line)
+function M.build_phrase_line(pattern_line)
     local note_cols = {}
     for i, col in ipairs(pattern_line.note_columns or {}) do
         local eff_num = col.effect_number_value
@@ -586,127 +586,53 @@ function M._build_phrase_line(pattern_line)
 end
 
 ---------------------------------------------------------------------------
--- Iterator builder: two tracks → note sequence
+-- Mapping: pattern line offset → phrase line index
 ---------------------------------------------------------------------------
 
---- Build an iterator that walks two pattern tracks in parallel and
---- yields lines from the resolved track until the trigger track signals
---- the end of the current note.
+--- Given a pattern line offset (relative to where the phrase trigger sits
+--- in the pattern) and a phrase, return the 1-based phrase line index that
+--- would sound on that pattern line.
 ---
---- On the very first line the trigger track's note is treated as the
---- initiating note.  The iterator yields the corresponding resolved
---- line and keeps going while the trigger track has NOTE_EMPTY lines.
---- It stops (returns nil) as soon as the trigger track contains:
----   • NOTE_OFF  — the resolved line is yielded, then the iterator ends
----   • a new real note (0-119) — the iterator ends WITHOUT yielding
----     that line (it belongs to the next phrase)
+--- The mapping accounts for the LPB ratio between the song grid and the
+--- phrase grid.  For looping phrases, the index wraps around using the
+--- phrase's loop_start / loop_end range.  For one-shot phrases, returns
+--- nil when the offset falls past the last phrase line.
 ---
---- Both tracks are plain arrays of PatternLine-shaped tables, indexed
---- 1-based, walked from start_line to the end of the shorter track.
----
---- @param  trigger_track  PatternLineTable[]  Array of PatternLine tables (trigger)
---- @param  resolved_track PatternLineTable[]  Array of PatternLine tables (resolved)
---- @param  start_line     number?            First line to read (default 1)
---- @return PatternLineIterator                Iterator yielding PatternLine tables
+--- @param  pattern_offset  number      0-based song-line offset from the trigger
+--- @param  phrase          PhraseData  Phrase data
+--- @param  song_lpb        number?     Song lines-per-beat (default 4)
+--- @return number?                     1-based phrase line index, or nil if past end
 
-function M.resolved_track_iter(trigger_track, resolved_track, start_line)
-    start_line = start_line or 1
+function M.phrase_line_from_pattern_offset(pattern_offset, phrase, song_lpb)
+    song_lpb = song_lpb or 4
 
-    local idx = start_line
-    local total = math.min(#trigger_track, #resolved_track)
-    local first = true
-    local finished = false
+    local phrase_lpb = phrase.lpb or song_lpb
+    local total = phrase.number_of_lines
+    local looping = phrase.looping or false
+    local loop_start = phrase.loop_start or 1
+    local loop_end = phrase.loop_end or total
 
-    return function()
-        if finished or idx > total then
+    loop_start = math.max(1, math.min(loop_start, total))
+    loop_end = math.max(loop_start, math.min(loop_end, total))
+
+    -- Convert pattern offset to phrase line (0-based)
+    local phrase_line_0 = math.floor(pattern_offset / song_lpb * phrase_lpb)
+
+    if not looping then
+        if phrase_line_0 >= total then
             return nil
         end
-
-        local trig_line = trigger_track[idx]
-        local res_line = resolved_track[idx]
-        local first_col = ((trig_line.note_columns or {})[1])
-        local nv = first_col and first_col.note_value
-
-        if first then
-            -- First line: accept whatever is there as the trigger
-            first = false
-            idx = idx + 1
-            return res_line
-        end
-
-        -- Subsequent lines: check the trigger track
-        if nv and nv ~= M.NOTE_EMPTY then
-            if nv == M.NOTE_OFF then
-                -- Include the OFF line, then stop
-                finished = true
-                idx = idx + 1
-                return res_line
-            end
-            -- New real note → don't include, stop
-            finished = true
-            return nil
-        end
-
-        -- NOTE_EMPTY or no note column → keep going
-        idx = idx + 1
-        return res_line
-    end
-end
-
----------------------------------------------------------------------------
--- High-level: pattern line iterator → phrase
----------------------------------------------------------------------------
-
---- Consume a pattern-line iterator and build a phrase table.
----
---- This is the inverse of resolve_pattern_phrase: it reads resolved
---- pattern lines (one per song line) and packs them into a phrase
---- structure that resolve_phrase_iter can play back.
----
---- The iterator is consumed until the first note column yields either
---- NOTE_OFF or a new note (0-119).  An OFF line is included in the
---- phrase (it terminates the sound); a new-note line is NOT included
---- (it belongs to the next phrase).
----
---- Instrument values and 0Zxx effects are stripped from the output,
---- since they are pattern-level concepts and have no meaning inside a
---- phrase.
----
---- @param  iter     PatternLineIterator  Iterator yielding PatternLine-shaped tables
---- @param  options  ResolveOptions?     { song_lpb = 4 }
---- @return PhraseData?                  Phrase table compatible with resolve_phrase_iter,
----                                      or nil when the iterator yields nothing
-
-function M.build_phrase_from_iter(iter, options)
-    options = options or {}
-    local song_lpb = options.song_lpb or 4
-
-    local lines = {}
-    local base_note = nil
-
-    while true do
-        local line = iter()
-        if not line then
-            break
-        end
-
-        lines[#lines + 1] = M._build_phrase_line(line)
+        return phrase_line_0
     end
 
-    if #lines == 0 then
-        return nil
+    -- Looping: first run through lines 1..loop_end, then wrap in the loop range
+    if phrase_line_0 < loop_end then
+        return phrase_line_0
     end
 
-    return {
-        lines = lines,
-        number_of_lines = #lines,
-        base_note = base_note or M.DEFAULT_BASE_NOTE,
-        key_tracking = M.KEY_TRACKING_TRANSPOSE,
-        lpb = song_lpb,
-        looping = false,
-        loop_start = 1,
-        loop_end = #lines,
-    }
+    local loop_len = loop_end - loop_start
+    local past_loop = phrase_line_0 - loop_end
+    return loop_start + (past_loop % loop_len)
 end
 
 ---------------------------------------------------------------------------
