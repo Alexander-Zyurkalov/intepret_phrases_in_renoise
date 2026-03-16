@@ -30,7 +30,10 @@ end
 --- @return number?
 local function find_resource_track(res_track_idx)
     local song = renoise.song()
-    local res_track = song:track(res_track_idx)
+    local res_track = song.tracks[res_track_idx]
+    if not res_track then
+        return nil
+    end
     local res_name = res_track.name
 
     -- Remove the _res suffix to get the source track name
@@ -41,14 +44,13 @@ local function find_resource_track(res_track_idx)
     local source_name = res_name:sub(1, -#RES_SUFFIX - 1)
 
     for i = 1, #song.tracks do
-        if song:track(i).name == source_name then
+        if song.tracks[i].name == source_name then
             return i
         end
     end
 
     return nil
 end
-
 
 --- Find the _res track for a given source track (by name).
 --- Returns the track index, or nil if not found.
@@ -305,7 +307,7 @@ end
 --- Returns the (possibly modified) line, or nil if no Zxx found anywhere.
 --- @param seq_pos number
 --- @param pos PatternLinePosition
---- @return renoise.PatternLine|ClonedLine|nil
+--- @return renoise.PatternLine|nil
 local function prepare_line(seq_pos, pos)
     local song = renoise.song()
     local pattern = song:pattern(pos.pattern)
@@ -583,14 +585,19 @@ local function interpret_line_from_resolved(pos)
         return
     end
 
-    local resource_track = find_resource_track(pos)
+    local resource_track = find_resource_track(pos.track)
     if not resource_track then
         return
     end
     local owning_seq, owning_line = find_note_at_or_before(
             resource_track, seq_pos, pos.line
     )
-    phrase_resolver.resolved_track_iter(resource_track, pos.track, owning_line)
+
+    print("Owning_line = ", owning_line)
+
+    --local iter = phrase_resolver.resolved_track_iter(resource_track, pos.track, owning_line)
+    --local phrase = phrase_resolver.build_phrase_from_iter(iter, )
+
 end
 
 --- Handle a change on an original (source) track.
@@ -600,7 +607,7 @@ end
 --- the song.  When a note is deleted, this re-extends the previous note's
 --- phrase to cover the gap.
 --- @param pos PatternLinePosition
-local function interpret_line_from_trigger_track(pos)
+local function interpret_line_from_source_track(pos)
     local song = renoise.song()
 
     local res_idx = find_res_track(pos.track)
@@ -671,10 +678,10 @@ local function interpret_line(pos)
         return
     end
 
-    if is_resolved_track(track_obj.name) then
-        --interpret_line_from_resolved(pos)
+    if is_resolved_track(track_obj.name) and song.selected_track_index == pos.track then
+        interpret_line_from_resolved(pos)
     else
-        interpret_line_from_trigger_track(pos)
+        interpret_line_from_source_track(pos)
     end
 end
 
