@@ -939,48 +939,6 @@ local function detach_phrase_notifiers()
     phrase_notifier_entries = {}
 end
 
---- Install line notifiers on every phrase of every instrument.
-local function attach_phrase_notifiers()
-    detach_phrase_notifiers()
-
-    local song = renoise.song()
-    for inst_idx = 1, #song.instruments do
-        local instrument = song.instruments[inst_idx]
-        for phrase_idx = 1, #instrument.phrases do
-            local phrase = instrument.phrases[phrase_idx]
-            local cb = function(_pos)
-                if rebuilding_globally then
-                    return
-                end
-                rebuild_phrase(inst_idx, phrase_idx)
-            end
-            phrase:add_line_notifier(cb)
-            phrase_notifier_entries[#phrase_notifier_entries + 1] = {
-                inst_idx = inst_idx,
-                phrase_idx = phrase_idx,
-                callback = cb,
-            }
-        end
-    end
-
-    print(string.format(
-            ">> Phrase Resolver: watching %d phrase(s)",
-            #phrase_notifier_entries
-    ))
-end
-
---- Observe phrases_observable on every instrument so that when phrases
---- are added or removed, we re-attach the line notifiers.
-local function attach_phrase_list_observers()
-    local song = renoise.song()
-    for inst_idx = 1, #song.instruments do
-        local instrument = song.instruments[inst_idx]
-        instrument.phrases_observable:add_notifier(function()
-            attach_phrase_notifiers()
-        end)
-    end
-end
-
 --------------------------------------------------------------------------------
 -- Song lifecycle
 --------------------------------------------------------------------------------
@@ -993,8 +951,6 @@ local function setup_song_notifiers()
     end
     song.selected_pattern_observable:add_notifier(on_selected_pattern_changed)
     attach_to_pattern(song.selected_pattern_index)
-    attach_phrase_list_observers()
-    attach_phrase_notifiers()
 end
 
 
