@@ -543,12 +543,23 @@ end
 ---------------------------------------------------------------------------
 
 --- Strip instrument values and 0Zxx effects from a pattern line,
---- producing a phrase-line-shaped table.
+--- producing a phrase-line-shaped table.  When trigger_note and
+--- base_note are provided, note values are transposed by the
+--- difference (trigger_note − base_note), matching Renoise's
+--- key-tracking transpose behaviour.
 ---
 --- @param  pattern_line  PatternLineTable  PatternLine-shaped table
+--- @param  trigger_note  number?           MIDI note that triggered the phrase (0-119)
+--- @param  base_note     number?           Phrase base note (default DEFAULT_BASE_NOTE)
 --- @return PatternLineTable               Phrase-line-shaped table
 
-function M.build_phrase_line(pattern_line)
+function M.build_phrase_line(pattern_line, trigger_note, base_note)
+    base_note = base_note or M.DEFAULT_BASE_NOTE
+    local transpose = 0
+    if trigger_note then
+        transpose = base_note - trigger_note
+    end
+
     local note_cols = {}
     for i, col in ipairs(pattern_line.note_columns or {}) do
         local eff_num = col.effect_number_value
@@ -558,8 +569,12 @@ function M.build_phrase_line(pattern_line)
             eff_num = M.EMPTY_EFFECT_NUMBER
             eff_amt = M.EMPTY_EFFECT_AMOUNT
         end
+        local nv = col.note_value
+        if nv and transpose ~= 0 then
+            nv = M._transpose_note(nv, transpose)
+        end
         note_cols[i] = {
-            note_value = col.note_value,
+            note_value = nv,
             instrument_value = M.EMPTY_INSTRUMENT,
             volume_value = col.volume_value,
             panning_value = col.panning_value,

@@ -622,7 +622,6 @@ local function interpret_line_from_resolved(pos)
     local pattern = song:pattern(pos.pattern)
     local line = pattern:track(pos.track):line(pos.line)
 
-    -- Find this pattern's position in the sequencer.
     local seq_pos = find_sequence_position(pos)
     if not seq_pos then
         return
@@ -654,13 +653,25 @@ local function interpret_line_from_resolved(pos)
     local phrase = song.instruments[1].phrases[phrase_index]
     local song_lpb = song.transport.lpb
 
-    local phrase_line_number = phrase_resolver.phrase_line_from_pattern_offset(total_lines, phrase, song_lpb)
+    local phrase_line_number = phrase_resolver.phrase_line_from_pattern_offset(
+            total_lines, phrase, song_lpb
+    )
     if not phrase_line_number then
         print("No phrase line")
+        return
     end
-    local phrase_line = phrase_resolver.build_phrase_line(line)
-    copy_line_to_phrase(phrase_line, phrase, phrase_line_number)
 
+    local owning_pattern_num = song.sequencer.pattern_sequence[owning_seq]
+    local owning_pattern_line = song:pattern(owning_pattern_num)
+                                    :track(resource_track):line(owning_line)
+    local trigger_note = owning_pattern_line:note_column(1).note_value
+
+    local base_note = phrase.base_note or phrase_resolver.DEFAULT_BASE_NOTE
+
+    local phrase_line = phrase_resolver.build_phrase_line(
+            line, trigger_note, base_note
+    )
+    copy_line_to_phrase(phrase_line, phrase, phrase_line_number)
 end
 
 --- Handle a change on an original (source) track.
