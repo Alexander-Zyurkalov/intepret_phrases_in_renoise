@@ -837,6 +837,17 @@ end
 --- @return nil
 local function rebuild_current_phrase()
     local song = renoise.song()
+
+    -- If standing on a _res track, move selection to the source track
+    -- to prevent the notifier from firing recursively.
+    local sel_track = song:track(song.selected_track_index)
+    if is_resolved_track(sel_track.name) then
+        local src_idx = find_resource_track(song.selected_track_index)
+        if src_idx then
+            song.selected_track_index = src_idx
+        end
+    end
+
     local inst_idx = song.selected_instrument_index
     local phrase_idx = song.selected_phrase_index
 
