@@ -576,6 +576,44 @@ local function find_sequence_position(pos)
     end
     return seq_pos
 end
+
+local function copy_line_to_phrase(phrase_line, phrase, phrase_line_number)
+    for col_i, col in ipairs(phrase_line.note_columns) do
+        local nc = phrase.lines[phrase_line_number]:note_column(col_i)
+        if col.note_value then
+            nc.note_value = col.note_value
+        end
+        if col.instrument_value then
+            nc.instrument_value = col.instrument_value
+        end
+        if col.volume_value then
+            nc.volume_value = col.volume_value
+        end
+        if col.panning_value then
+            nc.panning_value = col.panning_value
+        end
+        if col.delay_value then
+            nc.delay_value = col.delay_value
+        end
+        if col.effect_number_value then
+            nc.effect_number_value = col.effect_number_value
+        end
+        if col.effect_amount_value then
+            nc.effect_amount_value = col.effect_amount_value
+        end
+    end
+
+    for fx_i, fc in ipairs(phrase_line.effect_columns) do
+        local ec = phrase.lines[phrase_line_number]:effect_column(fx_i)
+        if fc.number_value then
+            ec.number_value = fc.number_value
+        end
+        if fc.amount_value then
+            ec.amount_value = fc.amount_value
+        end
+    end
+end
+
 --- Handle a change on a _res track.
 --- (Stub — not yet implemented.)
 --- @param pos PatternLinePosition
@@ -621,40 +659,7 @@ local function interpret_line_from_resolved(pos)
         print("No phrase line")
     end
     local phrase_line = phrase_resolver.build_phrase_line(line)
-    for col_i, col in ipairs(phrase_line.note_columns) do
-        local nc = phrase.lines[phrase_line_number]:note_column(col_i)
-        if col.note_value then
-            nc.note_value = col.note_value
-        end
-        if col.instrument_value then
-            nc.instrument_value = col.instrument_value
-        end
-        if col.volume_value then
-            nc.volume_value = col.volume_value
-        end
-        if col.panning_value then
-            nc.panning_value = col.panning_value
-        end
-        if col.delay_value then
-            nc.delay_value = col.delay_value
-        end
-        if col.effect_number_value then
-            nc.effect_number_value = col.effect_number_value
-        end
-        if col.effect_amount_value then
-            nc.effect_amount_value = col.effect_amount_value
-        end
-    end
-
-    for fx_i, fc in ipairs(phrase_line.effect_columns) do
-        local ec = phrase.lines[phrase_line_number]:effect_column(fx_i)
-        if fc.number_value then
-            ec.number_value = fc.number_value
-        end
-        if fc.amount_value then
-            ec.amount_value = fc.amount_value
-        end
-    end
+    copy_line_to_phrase(phrase_line, phrase, phrase_line_number)
 
 end
 
