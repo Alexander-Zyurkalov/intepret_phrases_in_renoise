@@ -17,6 +17,11 @@ local watched_pattern_index = nil
 --- @type boolean
 local rebuilding_globally = false
 
+--- Stored phrase notifier entries for cleanup.
+--- Each entry: { inst_idx, phrase_idx, callback }
+--- @type table[]
+local phrase_notifier_entries = {}
+
 --------------------------------------------------------------------------------
 -- Track helpers
 --------------------------------------------------------------------------------
@@ -818,25 +823,6 @@ local function on_selected_pattern_changed()
 end
 
 --------------------------------------------------------------------------------
--- Song lifecycle
---------------------------------------------------------------------------------
-
---- @return nil
-local function setup_song_notifiers()
-    local song = renoise.song()
-    if song.selected_pattern_observable:has_notifier(on_selected_pattern_changed) then
-        song.selected_pattern_observable:remove_notifier(on_selected_pattern_changed)
-    end
-    song.selected_pattern_observable:add_notifier(on_selected_pattern_changed)
-    attach_to_pattern(song.selected_pattern_index)
-end
-
---- @return nil
-local function teardown_song_notifiers()
-    watched_pattern_index = nil
-end
-
---------------------------------------------------------------------------------
 -- Rebuild phrase
 --------------------------------------------------------------------------------
 
@@ -926,6 +912,75 @@ local function rebuild_current_phrase()
             phrase_idx, inst_idx
     ))
 end
+
+--------------------------------------------------------------------------------
+-- Phrase notifiers
+--------------------------------------------------------------------------------
+
+--- Remove all currently installed phrase line notifiers.
+local function detach_phrase_notifiers()
+    local song_ok, song = pcall(renoise.song)
+    if not song_ok then
+        phrase_notifier_entries = {}
+        return
+    end
+
+    for _, entry in ipairs(phrase_notifier_entries) do
+        local ok, inst = pcall(function()
+            return song.instruments[entry.inst_idx]
+        end)
+        if ok and inst and entry.phrase_idx <= #inst.phrases then
+            local phrase = inst.phrases[entry.phrase_idx]
+            if phrase:has_line_notifier(entry.callback) then
+                phrase:remove_line_notifier(entry.callback)
+            end
+        end
+    end
+    phrase_notifier_entries = {}
+end
+
+--- Install line notifiers on every phrase of every instrument.
+local function attach_phrase_notifiers()
+    detach_phrase_notifiers()
+
+    local song = renoise.song()
+    for inst_idx = 1, #song.instruments do
+        local instrument = song.instruments[inst_idx]
+        for phrase_idx = 1, #instrument.phrases do
+            local phrase = instrument.phrases[phrase_idx]
+            local cb = function(_pos)
+                rebuild_phrase(inst_idx, phrase_idx)
+            end
+            phrase:add_line_notifier(cb)
+            phrase_notifier_entries[#phrase_notifier_entries + 1] = {
+                inst_idx = inst_idx,
+                phrase_idx = phrase_idx,
+                callback = cb,
+            }
+        end
+    end
+
+    print(string.format(
+            ">> Phrase Resolver: watching %d phrase(s)",
+            #phrase_notifier_entries
+    ))
+end
+
+--------------------------------------------------------------------------------
+-- Song lifecycle
+--------------------------------------------------------------------------------
+
+--- @return nil
+local function setup_song_notifiers()
+    local song = renoise.song()
+    if song.selected_pattern_observable:has_notifier(on_selected_pattern_changed) then
+        song.selected_pattern_observable:remove_notifier(on_selected_pattern_changed)
+    end
+    song.selected_pattern_observable:add_notifier(on_selected_pattern_changed)
+    attach_to_pattern(song.selected_pattern_index)
+    attach_phrase_notifiers()
+end
+
 
 --------------------------------------------------------------------------------
 -- Tool entry point
