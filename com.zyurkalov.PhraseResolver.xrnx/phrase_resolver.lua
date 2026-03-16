@@ -634,7 +634,7 @@ function M.phrase_line_from_pattern_offset(pattern_offset, phrase, song_lpb)
     local phrase_line_0 = math.floor(pattern_offset / song_lpb * phrase_lpb)
 
     if not looping then
-        if phrase_line_0 >= total then
+        if phrase_line_0 > total then
             return nil
         end
         return phrase_line_0
@@ -647,7 +647,7 @@ function M.phrase_line_from_pattern_offset(pattern_offset, phrase, song_lpb)
 
     local loop_len = loop_end - loop_start + 1
     local past_loop = phrase_line_0 - loop_end
-    return loop_start + (past_loop % loop_len)
+    return loop_start + (past_loop % loop_len) - 1
 end
 
 ---------------------------------------------------------------------------

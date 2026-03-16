@@ -662,17 +662,14 @@ local function interpret_line_from_resolved(pos)
     local phrase = song.instruments[1].phrases[phrase_index]
     local song_lpb = song.transport.lpb
 
-    local phrase_line_number = phrase_resolver.phrase_line_from_pattern_offset(
-            total_lines, phrase, song_lpb
-    )
+    local phrase_line_number = phrase_resolver.phrase_line_from_pattern_offset(total_lines, phrase, song_lpb)
     if not phrase_line_number then
         print("No phrase line")
         return
     end
 
     local owning_pattern_num = song.sequencer.pattern_sequence[owning_seq]
-    local owning_pattern_line = song:pattern(owning_pattern_num)
-                                    :track(resource_track):line(owning_line)
+    local owning_pattern_line = song:pattern(owning_pattern_num):track(resource_track):line(owning_line)
     local trigger_note = owning_pattern_line:note_column(1).note_value
 
     local base_note = phrase.base_note or phrase_resolver.DEFAULT_BASE_NOTE
