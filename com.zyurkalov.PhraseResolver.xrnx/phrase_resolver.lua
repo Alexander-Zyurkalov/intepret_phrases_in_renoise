@@ -641,11 +641,11 @@ function M.phrase_line_from_pattern_offset(pattern_offset, phrase, song_lpb)
     end
 
     -- Looping: first run through lines 1..loop_end, then wrap in the loop range
-    if phrase_line_0 < loop_end then
+    if phrase_line_0 <= loop_end then
         return phrase_line_0
     end
 
-    local loop_len = loop_end - loop_start
+    local loop_len = loop_end - loop_start + 1
     local past_loop = phrase_line_0 - loop_end
     return loop_start + (past_loop % loop_len)
 end
