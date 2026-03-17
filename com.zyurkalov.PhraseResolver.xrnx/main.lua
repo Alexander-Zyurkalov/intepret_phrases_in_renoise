@@ -392,7 +392,7 @@ end
 --- @param start_line number
 --- @param stop_seq_pos number?
 --- @param stop_line number?
-local function fill_res_track(iter, track_idx, res_idx, start_seq_pos, start_line,
+local function fill_res_track(iter, res_idx, start_seq_pos, start_line,
                               stop_seq_pos, stop_line)
     local song = renoise.song()
     local seq = song.sequencer.pattern_sequence
@@ -649,6 +649,7 @@ local function interpret_line_from_resolved(pos)
         total_lines = total_lines + song.patterns[pattern_num].number_of_lines
     end
     total_lines = total_lines + pos.line
+    -- TODO: it doesn't edit if there are no loop in the phrase
     -- TODO: fix tests, check whether start loop is not 1
     -- TODO: update velocity and effects
     local phrase_index = find_active_phrase_index(
@@ -656,6 +657,9 @@ local function interpret_line_from_resolved(pos)
     )
     if not phrase_index then
         print("No phrase")
+        return
+    end
+    if phrase_index == 0  then
         return
     end
 
@@ -670,8 +674,6 @@ local function interpret_line_from_resolved(pos)
     local inst_idx = inst_value + 1  -- 0-based → 1-based
 
     -- Activate the instrument and phrase so Renoise allows editing it.
-    local prev_inst = song.selected_instrument_index
-    local prev_phrase = song.selected_phrase_index
     song.selected_instrument_index = inst_idx
     song.selected_phrase_index = phrase_index
 
@@ -758,8 +760,7 @@ local function interpret_line_from_source_track(pos)
     )
 
     -- Fill from the owning note forward.
-    fill_res_track(iter, pos.track, res_idx,
-            owning_seq, owning_line, stop_seq, stop_ln)
+    fill_res_track(iter,res_idx, owning_seq, owning_line, stop_seq, stop_ln)
 end
 
 --- Dispatch a line change to the appropriate handler.
@@ -931,32 +932,6 @@ local function rebuild_current_phrase()
             "Phrase Resolver: rebuilt phrase %d of instrument %d.",
             phrase_idx, inst_idx
     ))
-end
-
---------------------------------------------------------------------------------
--- Phrase notifiers
---------------------------------------------------------------------------------
-
---- Remove all currently installed phrase line notifiers.
-local function detach_phrase_notifiers()
-    local song_ok, song = pcall(renoise.song)
-    if not song_ok then
-        phrase_notifier_entries = {}
-        return
-    end
-
-    for _, entry in ipairs(phrase_notifier_entries) do
-        local ok, inst = pcall(function()
-            return song.instruments[entry.inst_idx]
-        end)
-        if ok and inst and entry.phrase_idx <= #inst.phrases then
-            local phrase = inst.phrases[entry.phrase_idx]
-            if phrase:has_line_notifier(entry.callback) then
-                phrase:remove_line_notifier(entry.callback)
-            end
-        end
-    end
-    phrase_notifier_entries = {}
 end
 
 --------------------------------------------------------------------------------
