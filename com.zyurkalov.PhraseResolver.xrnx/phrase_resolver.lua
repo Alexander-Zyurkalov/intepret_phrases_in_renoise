@@ -290,15 +290,9 @@ end
 --- Wrap a phrase iterator and yield one PatternLine-shaped table per song
 --- line offset (0, 1, 2, …).
 ---
---- Phrase lines are placed on the correct song-grid position based on
---- their time_in_beats and the song LPB.  When a phrase line falls
---- between song lines, it is placed on the nearest song line with a
---- delay value.  If multiple phrase lines map to the same song line,
---- only the first is kept (no extra columns are created).
----
---- Returns nil when the phrase is exhausted (one-shot finished).
---- Returns an empty PatternLine for gap lines with no phrase content.
---- For looping phrases the iterator never returns nil.
+--- Phrase lines are placed on the pattern grid only if they align perfectly
+--- with a song line (based on their time_in_beats and the song LPB).
+--- Any phrase lines that fall between song lines are completely discarded.
 ---
 --- @param  phrase_iter  PhraseLineIterator  Iterator from resolve_phrase_iter
 --- @param  song_lpb     number?            The song's lines-per-beat
@@ -630,8 +624,7 @@ function M.phrase_line_from_pattern_offset(pattern_offset, phrase, song_lpb)
     loop_start = math.max(1, math.min(loop_start, total))
     loop_end = math.max(loop_start, math.min(loop_end, total))
 
-    -- Convert pattern offset to phrase line (0-based)
-    local phrase_line_0 = math.floor(pattern_offset / song_lpb * phrase_lpb)
+    local phrase_line_0 = math.floor((pattern_offset - 1) / song_lpb * phrase_lpb) + 1
 
     if not looping then
         if phrase_line_0 > total then
