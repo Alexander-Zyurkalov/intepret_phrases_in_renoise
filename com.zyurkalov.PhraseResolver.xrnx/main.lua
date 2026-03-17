@@ -649,7 +649,6 @@ local function interpret_line_from_resolved(pos)
         total_lines = total_lines + song.patterns[pattern_num].number_of_lines
     end
     total_lines = total_lines + pos.line
-
     -- TODO: fix tests, check whether start loop is not 1
     -- TODO: update velocity and effects
     local phrase_index = find_active_phrase_index(
@@ -660,8 +659,29 @@ local function interpret_line_from_resolved(pos)
         return
     end
 
+    -- Resolve the instrument from the owning note.
+    local owning_pattern_num = song.sequencer.pattern_sequence[owning_seq]
+    local owning_pattern_line = song:pattern(owning_pattern_num):track(resource_track):line(owning_line)
+    local inst_value = owning_pattern_line:note_column(1).instrument_value
+    if inst_value == 255 then
+        print("No instrument on owning note")
+        return
+    end
+    local inst_idx = inst_value + 1  -- 0-based → 1-based
+
+    -- Activate the instrument and phrase so Renoise allows editing it.
+    local prev_inst = song.selected_instrument_index
+    local prev_phrase = song.selected_phrase_index
+    song.selected_instrument_index = inst_idx
+    song.selected_phrase_index = phrase_index
+
+
     --- @type renoise.InstrumentPhrase
-    local phrase = song.instruments[1].phrases[phrase_index]
+    local phrase = song.instruments[inst_idx].phrases[phrase_index]
+    if not phrase then
+        print("Phrase not found")
+        return
+    end
     local song_lpb = song.transport.lpb
 
     local phrase_line_number = phrase_resolver.phrase_line_from_pattern_offset(total_lines, phrase, song_lpb)
@@ -670,8 +690,6 @@ local function interpret_line_from_resolved(pos)
         return
     end
 
-    local owning_pattern_num = song.sequencer.pattern_sequence[owning_seq]
-    local owning_pattern_line = song:pattern(owning_pattern_num):track(resource_track):line(owning_line)
     local trigger_note = owning_pattern_line:note_column(1).note_value
 
     local base_note = phrase.base_note or phrase_resolver.DEFAULT_BASE_NOTE
@@ -679,7 +697,10 @@ local function interpret_line_from_resolved(pos)
     local phrase_line = phrase_resolver.build_phrase_line(
             line, trigger_note, base_note
     )
+
+
     copy_line_to_phrase(phrase_line, phrase, phrase_line_number)
+
 end
 
 --- Handle a change on an original (source) track.
