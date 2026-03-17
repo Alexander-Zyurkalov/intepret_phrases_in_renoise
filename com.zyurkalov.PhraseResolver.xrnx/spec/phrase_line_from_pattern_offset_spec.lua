@@ -177,6 +177,11 @@ describe("phrase_line_from_pattern_offset (looping, same LPB)", function()
             number_of_lines = 8, lpb = 4, looping = true,
             loop_start = 5, loop_end = 8,
         })
+        assert.are.equal(1, M.phrase_line_from_pattern_offset(1, phrase, 4))
+        assert.are.equal(4, M.phrase_line_from_pattern_offset(4, phrase, 4))
+        assert.are.equal(5, M.phrase_line_from_pattern_offset(5, phrase, 4))
+        assert.are.equal(8, M.phrase_line_from_pattern_offset(8, phrase, 4))
+        --
         assert.are.equal(5, M.phrase_line_from_pattern_offset(9, phrase, 4))
         assert.are.equal(6, M.phrase_line_from_pattern_offset(10, phrase, 4))
         assert.are.equal(7, M.phrase_line_from_pattern_offset(11, phrase, 4))

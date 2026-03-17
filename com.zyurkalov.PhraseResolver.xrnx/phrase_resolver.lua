@@ -640,7 +640,7 @@ function M.phrase_line_from_pattern_offset(pattern_offset, phrase, song_lpb)
 
     local loop_len = loop_end - loop_start + 1
     local past_loop = phrase_line_0 - loop_end
-    return loop_start + (past_loop % loop_len) - 1
+    return loop_start + (( past_loop - 1  )% loop_len)
 end
 
 ---------------------------------------------------------------------------

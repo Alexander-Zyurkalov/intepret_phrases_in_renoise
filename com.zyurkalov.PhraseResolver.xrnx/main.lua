@@ -651,8 +651,6 @@ local function interpret_line_from_resolved(pos)
         total_lines = total_lines + song.patterns[pattern_num].number_of_lines
     end
     total_lines = total_lines + pos.line - owning_line + 1
-    -- different PBP don't work
-    -- TODO: fix tests
     -- TODO: update velocity and effects
     -- TODO: transpose with scales
     local phrase_index = find_active_phrase_index(
