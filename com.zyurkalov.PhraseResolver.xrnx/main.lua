@@ -643,20 +643,22 @@ local function interpret_line_from_resolved(pos)
     local owning_seq, owning_line = find_note_at_or_before(
             resource_track, seq_pos, pos.line
     )
+    if not owning_seq then
+        return
+    end
     local total_lines = 0
     for seq_num = owning_seq, seq_pos - 1, 1 do
         local pattern_num = song.sequencer.pattern_sequence[seq_num]
         total_lines = total_lines + song.patterns[pattern_num].number_of_lines
     end
-    total_lines = total_lines + pos.line
-    -- TODO: it doesn't edit if there are no loop in the phrase
+    total_lines = total_lines + pos.line - owning_line + 1
     -- TODO: fix tests, check whether start loop is not 1
     -- TODO: update velocity and effects
+    -- TODO: transpose with scales
     local phrase_index = find_active_phrase_index(
             resource_track, seq_pos, pos.line
     )
     if not phrase_index then
-        print("No phrase")
         return
     end
     if phrase_index == 0  then
@@ -668,7 +670,6 @@ local function interpret_line_from_resolved(pos)
     local owning_pattern_line = song:pattern(owning_pattern_num):track(resource_track):line(owning_line)
     local inst_value = owning_pattern_line:note_column(1).instrument_value
     if inst_value == 255 then
-        print("No instrument on owning note")
         return
     end
     local inst_idx = inst_value + 1  -- 0-based → 1-based
@@ -681,14 +682,12 @@ local function interpret_line_from_resolved(pos)
     --- @type renoise.InstrumentPhrase
     local phrase = song.instruments[inst_idx].phrases[phrase_index]
     if not phrase then
-        print("Phrase not found")
         return
     end
     local song_lpb = song.transport.lpb
 
     local phrase_line_number = phrase_resolver.phrase_line_from_pattern_offset(total_lines, phrase, song_lpb)
     if not phrase_line_number then
-        print("No phrase line")
         return
     end
 
