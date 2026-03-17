@@ -385,14 +385,14 @@ end
 --- position and line, up to (but not including) a stop position.
 --- stop_seq_pos/stop_line can be nil to mean end of song.
 --- Clears lines where the iterator is exhausted (one-shot ended).
---- @param iter PatternLineIterator
+--- @param phrase_iter PatternLineIterator
 --- @param track_idx number
 --- @param res_idx number
 --- @param start_seq_pos number
 --- @param start_line number
 --- @param stop_seq_pos number?
 --- @param stop_line number?
-local function fill_res_track(iter, res_idx, start_seq_pos, start_line,
+local function fill_res_track(phrase_iter, res_idx, start_seq_pos, start_line,
                               stop_seq_pos, stop_line)
     local song = renoise.song()
     local seq = song.sequencer.pattern_sequence
@@ -419,7 +419,7 @@ local function fill_res_track(iter, res_idx, start_seq_pos, start_line,
             local target_line = res_track:line(ln)
             target_line:clear()
 
-            local pline = iter()
+            local pline = phrase_iter()
             if pline then
                 write_pattern_line(rns_res_track, target_line, pline)
             end
@@ -523,8 +523,7 @@ local function apply_overrides(iter, overrides)
         for _, nc in ipairs(pline.note_columns) do
             local note_off = 120
             if nc.note_value == note_off then
-                goto
-                continue
+                goto continue
             end
             if nc.instrument_value then
                 isThereANote = true
@@ -652,7 +651,8 @@ local function interpret_line_from_resolved(pos)
         total_lines = total_lines + song.patterns[pattern_num].number_of_lines
     end
     total_lines = total_lines + pos.line - owning_line + 1
-    -- TODO: fix tests, check whether start loop is not 1
+    -- different PBP don't work
+    -- TODO: fix tests
     -- TODO: update velocity and effects
     -- TODO: transpose with scales
     local phrase_index = find_active_phrase_index(
@@ -748,10 +748,10 @@ local function interpret_line_from_source_track(pos)
 
     -- Create the iterator, with overrides applied.
     local song_lpb = song.transport.lpb
-    local iter = phrase_resolver.resolve_pattern_phrase(
+    local phrase_iterator = phrase_resolver.resolve_pattern_phrase(
             line, song.instruments, { song_lpb = song_lpb }
     )
-    iter = apply_overrides(iter, overrides)
+    phrase_iterator = apply_overrides(phrase_iterator, overrides)
 
     -- Find the next note after the owning note (across patterns).
     local stop_seq, stop_ln = find_next_note_forward(
@@ -759,7 +759,7 @@ local function interpret_line_from_source_track(pos)
     )
 
     -- Fill from the owning note forward.
-    fill_res_track(iter,res_idx, owning_seq, owning_line, stop_seq, stop_ln)
+    fill_res_track(phrase_iterator, res_idx, owning_seq, owning_line, stop_seq, stop_ln)
 end
 
 --- Dispatch a line change to the appropriate handler.
