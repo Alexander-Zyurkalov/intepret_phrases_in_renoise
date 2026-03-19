@@ -256,6 +256,25 @@ describe("_snap_to_scale", function()
             -- Should behave like key of C
             assert.are.equal(n("C-4"), PR._snap_to_scale(n("C#4"), nil, "Natural Major"))
         end)
+
+        it("accepts numeric scale_key (1=C)", function()
+            -- 1 = C, same as string "C"
+            assert.are.equal(n("C-4"), PR._snap_to_scale(n("C#4"), 1, "Natural Major"))
+        end)
+
+        it("accepts numeric scale_key (3=D)", function()
+            -- 3 = D. In D Major, F snaps down to E.
+            assert.are.equal(n("E-4"), PR._snap_to_scale(n("F-4"), 3, "Natural Major"))
+        end)
+
+        it("numeric key 3 matches string key 'D'", function()
+            -- Both should produce identical results for all 12 chromatic notes
+            for note = 48, 59 do
+                local from_num = PR._snap_to_scale(note, 3, "Natural Major")
+                local from_str = PR._snap_to_scale(note, "D", "Natural Major")
+                assert.are.equal(from_str, from_num)
+            end
+        end)
     end)
 
     describe("Natural Minor (C)", function()
@@ -731,7 +750,41 @@ describe("resolve_phrase_iter with scale options", function()
             assert.are.equal(expected[i], line.note_columns[1].note_value)
         end
     end)
+
+    it("Renoise verification with numeric scale_key=3 (how Renoise returns it)", function()
+        -- Same test as above, but using numeric key 3 (=D) instead of "D",
+        -- matching what Renoise actually returns from trigger_options.scale_key.
+
+        local rows = {
+            { n("C-4") }, { n("D-4") }, { n("D#4") }, { n("F-4") },
+            { n("G-4") }, { n("A#4") }, { n("B-4") }, { n("C-5") },
+        }
+        local phrase = make_phrase(rows, { base_note = n("C-4") })
+        local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
+                { song_lpb = 4, scale_key = 3, scale_mode = "Dorian" })
+        local lines = collect(iter)
+
+        local expected = {
+            n("D-4"), -- C-4  +2 = D-4   (in scale)
+            n("E-4"), -- D-4  +2 = E-4   (in scale)
+            n("F-4"), -- D#4  +2 = F-4   (in scale)
+            n("G-4"), -- F-4  +2 = G-4   (in scale)
+            n("A-4"), -- G-4  +2 = A-4   (in scale)
+            n("C-5"), -- A#4  +2 = C-5   (in scale)
+            n("C-5"), -- B-4  +2 = C#5   → snap ↓ C-5
+            n("D-5"), -- C-5  +2 = D-5   (in scale)
+        }
+
+        assert.are.equal(#expected, #lines)
+        for i, line in ipairs(lines) do
+            assert.are.equal(expected[i], line.note_columns[1].note_value)
+        end
+    end)
 end)
+
+---------------------------------------------------------------------------
+-- resolve_pattern_phrase with instrument trigger_options
+---------------------------------------------------------------------------
 
 describe("resolve_pattern_phrase with trigger_options", function()
     it("applies scale from instrument trigger_options", function()
@@ -840,6 +893,28 @@ describe("resolve_pattern_phrase with trigger_options", function()
         -- snap down 1: F(65), relative 5, IS in minor
         assert.are.equal(n("D-4"), notes[1])
         assert.are.equal(n("F-4"), notes[2])
+    end)
+
+    it("works with numeric scale_key from trigger_options (as Renoise returns)", function()
+        -- Renoise returns scale_key as a 1-based integer, not a string.
+        -- scale_key=3 means D.
+        local instruments = {
+            {
+                phrases = {
+                    [1] = make_phrase({ { n("C-4") }, { n("C#4") }, { n("D-4") } }),
+                },
+                trigger_options = {
+                    scale_mode = "Dorian",
+                    scale_key = 3, -- D (as Renoise returns it)
+                },
+            },
+        }
+        local line = make_pattern_line_fx(n("D-4"), 0, 1)
+        local notes = collect_notes(
+                PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
+        )
+        -- D Dorian, transpose +2: C→D(ok), C#→D#(snap↓D), D→E(ok)
+        assert.are.same({ n("D-4"), n("D-4"), n("E-4") }, notes)
     end)
 end)
 

@@ -110,6 +110,30 @@ M.SCALE_KEY_OFFSETS = {
     ["Ab"] = 8,  ["Bb"] = 10,
 }
 
+--- Renoise returns scale_key as a 1-based integer:
+---   1=C, 2=C#, 3=D, … 12=B.
+--- This table maps that index to a semitone offset from C.
+--- @type table<number, number>
+M.SCALE_KEY_INDEX_OFFSETS = {
+    [1] = 0,  [2] = 1,  [3] = 2,  [4] = 3,  [5] = 4,  [6] = 5,
+    [7] = 6,  [8] = 7,  [9] = 8,  [10] = 9, [11] = 10, [12] = 11,
+}
+
+--- Normalise a scale_key value (string or 1-based integer) to a
+--- semitone offset from C.  Returns nil when the key is unrecognised.
+---
+--- @param  scale_key  string|number|nil
+--- @return number?
+function M._key_to_offset(scale_key)
+    if scale_key == nil then
+        return nil
+    end
+    if type(scale_key) == "number" then
+        return M.SCALE_KEY_INDEX_OFFSETS[scale_key]
+    end
+    return M.SCALE_KEY_OFFSETS[scale_key]
+end
+
 ---------------------------------------------------------------------------
 -- Scale snapping
 ---------------------------------------------------------------------------
@@ -118,7 +142,7 @@ M.SCALE_KEY_OFFSETS = {
 --- scale.  Searches outward (down first, then up) by up to 6 semitones.
 ---
 --- @param  note_value   number              MIDI note 0-119
---- @param  scale_key    string              Root key, e.g. "C", "D#"
+--- @param  scale_key    string|number        Root key: name ("C", "D#") or 1-based index (1–12)
 --- @param  scale_mode   string              Scale name, e.g. "Natural Major"
 --- @return number                           Snapped MIDI note (clamped 0-119)
 function M._snap_to_scale(note_value, scale_key, scale_mode)
@@ -132,7 +156,7 @@ function M._snap_to_scale(note_value, scale_key, scale_mode)
         return note_value
     end
 
-    local key_offset = M.SCALE_KEY_OFFSETS[scale_key] or 0
+    local key_offset = M._key_to_offset(scale_key) or 0
 
     -- Check if note is already in the scale
     local relative = (note_value - key_offset) % 12
