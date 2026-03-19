@@ -91,6 +91,76 @@ end
 --- Helper: get MIDI note value from a note name string.
 local n = PR.string_to_note
 
+---------------------------------------------------------------------------
+-- SCALE_DEGREES table
+---------------------------------------------------------------------------
+
+describe("SCALE_DEGREES", function()
+    it("has nil for 'None'", function()
+        assert.is_nil(PR.SCALE_DEGREES["None"])
+    end)
+
+    it("Natural Major has 7 degrees", function()
+        local count = 0
+        for _ in pairs(PR.SCALE_DEGREES["Natural Major"]) do
+            count = count + 1
+        end
+        assert.are.equal(7, count)
+    end)
+
+    it("Chromatic has 12 degrees", function()
+        local count = 0
+        for _ in pairs(PR.SCALE_DEGREES["Chromatic"]) do
+            count = count + 1
+        end
+        assert.are.equal(12, count)
+    end)
+
+    it("Pentatonic has 5 degrees", function()
+        local count = 0
+        for _ in pairs(PR.SCALE_DEGREES["Pentatonic"]) do
+            count = count + 1
+        end
+        assert.are.equal(5, count)
+    end)
+
+    it("Natural Major contains correct intervals", function()
+        local maj = PR.SCALE_DEGREES["Natural Major"]
+        -- C D E F G A B → 0 2 4 5 7 9 11
+        assert.is_true(maj[0])
+        assert.is_true(maj[2])
+        assert.is_true(maj[4])
+        assert.is_true(maj[5])
+        assert.is_true(maj[7])
+        assert.is_true(maj[9])
+        assert.is_true(maj[11])
+        assert.is_nil(maj[1])
+        assert.is_nil(maj[3])
+        assert.is_nil(maj[6])
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- SCALE_KEY_OFFSETS table
+---------------------------------------------------------------------------
+
+describe("SCALE_KEY_OFFSETS", function()
+    it("C is 0", function()
+        assert.are.equal(0, PR.SCALE_KEY_OFFSETS["C"])
+    end)
+    it("C# is 1", function()
+        assert.are.equal(1, PR.SCALE_KEY_OFFSETS["C#"])
+    end)
+    it("D is 2", function()
+        assert.are.equal(2, PR.SCALE_KEY_OFFSETS["D"])
+    end)
+    it("B is 11", function()
+        assert.are.equal(11, PR.SCALE_KEY_OFFSETS["B"])
+    end)
+    it("Db aliases to 1", function()
+        assert.are.equal(1, PR.SCALE_KEY_OFFSETS["Db"])
+    end)
+end)
 
 ---------------------------------------------------------------------------
 -- _snap_to_scale
@@ -566,11 +636,102 @@ describe("resolve_phrase_iter with scale options", function()
             assert.are.equal(expected[i], line.note_columns[1].note_value)
         end
     end)
-end)
 
----------------------------------------------------------------------------
--- resolve_pattern_phrase with instrument trigger_options
----------------------------------------------------------------------------
+    it("C Dorian: all 12 chromatic notes snap to C Dorian degrees", function()
+        -- C Dorian = C D Eb F G A Bb
+        -- Intervals from C: {0, 2, 3, 5, 7, 9, 10}
+        -- Phrase: all 12 chromatic notes C-4..B-4, base=C-4
+        -- Trigger = D-4 → transpose = +2
+        --
+        -- Note   +2     %12  In C Dorian?  Snap         Result
+        -- C-4    D-4    2    yes                         D-4
+        -- C#4    D#4    3    yes (Eb)                    D#4
+        -- D-4    E-4    4    no            ↓ D#(3)       D#4
+        -- D#4    F-4    5    yes                         F-4
+        -- E-4    F#4    6    no            ↓ F(5)        F-4
+        -- F-4    G-4    7    yes                         G-4
+        -- F#4    G#4    8    no            ↓ G(7)        G-4
+        -- G-4    A-4    9    yes                         A-4
+        -- G#4    A#4    10   yes (Bb)                    A#4
+        -- A-4    B-4    11   no            ↓ A#(10)      A#4
+        -- A#4    C-5    0    yes                         C-5
+        -- B-4    C#5    1    no            ↓ C(0)        C-5
+
+        local rows = {}
+        for i = 0, 11 do
+            rows[i + 1] = { 48 + i }  -- C-4 through B-4
+        end
+        local phrase = make_phrase(rows, { base_note = n("C-4") })
+        local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
+                { song_lpb = 4, scale_key = "C", scale_mode = "Dorian" })
+        local lines = collect(iter)
+
+        local expected = {
+            n("D-4"), -- C  +2 = D     (in scale)
+            n("D#4"), -- C# +2 = D#/Eb (in scale)
+            n("D#4"), -- D  +2 = E     → snap ↓ D#/Eb
+            n("F-4"), -- D# +2 = F     (in scale)
+            n("F-4"), -- E  +2 = F#    → snap ↓ F
+            n("G-4"), -- F  +2 = G     (in scale)
+            n("G-4"), -- F# +2 = G#    → snap ↓ G
+            n("A-4"), -- G  +2 = A     (in scale)
+            n("A#4"), -- G# +2 = A#/Bb (in scale)
+            n("A#4"), -- A  +2 = B     → snap ↓ A#/Bb
+            n("C-5"), -- A# +2 = C     (in scale)
+            n("C-5"), -- B  +2 = C#    → snap ↓ C
+        }
+
+        assert.are.equal(12, #lines)
+        for i, line in ipairs(lines) do
+            assert.are.equal(expected[i], line.note_columns[1].note_value)
+        end
+    end)
+
+    it("Renoise verification: C Dorian phrase notes, D Dorian scale, trigger D", function()
+        -- Phrase captured from Renoise (base=C-4, scale=D Dorian):
+        --   C-4, D-4, D#4, F-4, G-4, A#4, B-4, C-5
+        -- These are C Dorian notes, but the instrument scale is D Dorian.
+        -- Trigger = D-4 → transpose = +2
+        --
+        -- Piano roll output captured via MIDI loopback in Bitwig:
+        --   D, E, F, G, A, C, C, D  (all white keys)
+        --
+        -- Note    +2      Rel to D  In D Dorian?  Result
+        -- C-4     D-4     0         yes           D-4
+        -- D-4     E-4     2         yes           E-4
+        -- D#4     F-4     3         yes           F-4
+        -- F-4     G-4     5         yes           G-4
+        -- G-4     A-4     7         yes           A-4
+        -- A#4     C-5     10        yes           C-5
+        -- B-4     C#5     11        no  ↓ C(10)   C-5
+        -- C-5     D-5     0         yes           D-5
+
+        local rows = {
+            { n("C-4") }, { n("D-4") }, { n("D#4") }, { n("F-4") },
+            { n("G-4") }, { n("A#4") }, { n("B-4") }, { n("C-5") },
+        }
+        local phrase = make_phrase(rows, { base_note = n("C-4") })
+        local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
+                { song_lpb = 4, scale_key = "D", scale_mode = "Dorian" })
+        local lines = collect(iter)
+
+        local expected = {
+            n("D-4"), -- C-4  +2 = D-4   (in scale)
+            n("E-4"), -- D-4  +2 = E-4   (in scale)
+            n("F-4"), -- D#4  +2 = F-4   (in scale)
+            n("G-4"), -- F-4  +2 = G-4   (in scale)
+            n("A-4"), -- G-4  +2 = A-4   (in scale)
+            n("C-5"), -- A#4  +2 = C-5   (in scale)
+            n("C-5"), -- B-4  +2 = C#5   → snap ↓ C-5
+            n("D-5"), -- C-5  +2 = D-5   (in scale)
+        }
+
+        assert.are.equal(#expected, #lines)
+        for i, line in ipairs(lines) do
+            assert.are.equal(expected[i], line.note_columns[1].note_value)
+        end
+    end)
+end)
 
 describe("resolve_pattern_phrase with trigger_options", function()
     it("applies scale from instrument trigger_options", function()
