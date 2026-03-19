@@ -14,7 +14,9 @@ local function collect(iter, max)
     local result = {}
     for _ = 1, max do
         local item = iter()
-        if item == nil then break end
+        if item == nil then
+            break
+        end
         result[#result + 1] = item
     end
     return result
@@ -74,14 +76,14 @@ local function make_pattern_line_fx(note_val, inst_val, phrase_idx)
     end
     return {
         note_columns = { {
-            note_value = note_val,
-            instrument_value = inst_val,
-            volume_value = PR.EMPTY_VOLUME,
-            panning_value = PR.EMPTY_PANNING,
-            delay_value = PR.EMPTY_DELAY,
-            effect_number_value = PR.EMPTY_EFFECT_NUMBER,
-            effect_amount_value = PR.EMPTY_EFFECT_AMOUNT,
-        } },
+                             note_value = note_val,
+                             instrument_value = inst_val,
+                             volume_value = PR.EMPTY_VOLUME,
+                             panning_value = PR.EMPTY_PANNING,
+                             delay_value = PR.EMPTY_DELAY,
+                             effect_number_value = PR.EMPTY_EFFECT_NUMBER,
+                             effect_amount_value = PR.EMPTY_EFFECT_AMOUNT,
+                         } },
         effect_columns = fx,
     }
 end
@@ -285,15 +287,15 @@ describe("build_phrase_line (reverse path, no scale snapping)", function()
         opts = opts or {}
         return {
             note_columns = { {
-                note_value = note_val,
-                instrument_value = opts.instrument_value or 0,
-                volume_value = opts.volume_value or PR.EMPTY_VOLUME,
-                panning_value = PR.EMPTY_PANNING,
-                delay_value = PR.EMPTY_DELAY,
-                effect_number_value = opts.effect_number_value or PR.EMPTY_EFFECT_NUMBER,
-                effect_number_string = opts.effect_number_string,
-                effect_amount_value = opts.effect_amount_value or PR.EMPTY_EFFECT_AMOUNT,
-            } },
+                                 note_value = note_val,
+                                 instrument_value = opts.instrument_value or 0,
+                                 volume_value = opts.volume_value or PR.EMPTY_VOLUME,
+                                 panning_value = PR.EMPTY_PANNING,
+                                 delay_value = PR.EMPTY_DELAY,
+                                 effect_number_value = opts.effect_number_value or PR.EMPTY_EFFECT_NUMBER,
+                                 effect_number_string = opts.effect_number_string,
+                                 effect_amount_value = opts.effect_amount_value or PR.EMPTY_EFFECT_AMOUNT,
+                             } },
             effect_columns = opts.effect_columns or {},
         }
     end
@@ -451,14 +453,14 @@ describe("round-trip integrity (forward + reverse)", function()
         -- Verify the CORRECT (no-snap) reverse path:
         local line = {
             note_columns = { {
-                note_value = n("F-4"),
-                instrument_value = 0,
-                volume_value = PR.EMPTY_VOLUME,
-                panning_value = PR.EMPTY_PANNING,
-                delay_value = PR.EMPTY_DELAY,
-                effect_number_value = PR.EMPTY_EFFECT_NUMBER,
-                effect_amount_value = PR.EMPTY_EFFECT_AMOUNT,
-            } },
+                                 note_value = n("F-4"),
+                                 instrument_value = 0,
+                                 volume_value = PR.EMPTY_VOLUME,
+                                 panning_value = PR.EMPTY_PANNING,
+                                 delay_value = PR.EMPTY_DELAY,
+                                 effect_number_value = PR.EMPTY_EFFECT_NUMBER,
+                                 effect_amount_value = PR.EMPTY_EFFECT_AMOUNT,
+                             } },
             effect_columns = {},
         }
         local result = PR.build_phrase_line(line, n("D-4"), n("C-4"))
@@ -479,7 +481,7 @@ describe("resolve_phrase_iter with scale options", function()
         -- D-4+2=E-4 (in scale)
         local phrase = make_phrase({ { n("C-4") }, { n("C#4") }, { n("D-4") } })
         local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
-            { song_lpb = 4, scale_key = "C", scale_mode = "Natural Major" })
+                { song_lpb = 4, scale_key = "C", scale_mode = "Natural Major" })
         local lines = collect(iter)
         assert.are.equal(n("D-4"), lines[1].note_columns[1].note_value)
         assert.are.equal(n("D-4"), lines[2].note_columns[1].note_value)
@@ -498,7 +500,7 @@ describe("resolve_phrase_iter with scale options", function()
     it("preserves NOTE_OFF and NOTE_EMPTY with scale", function()
         local phrase = make_phrase({ { PR.NOTE_OFF }, { PR.NOTE_EMPTY }, { n("C-4") } })
         local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
-            { song_lpb = 4, scale_key = "C", scale_mode = "Natural Major" })
+                { song_lpb = 4, scale_key = "C", scale_mode = "Natural Major" })
         local lines = collect(iter)
         assert.are.equal(PR.NOTE_OFF, lines[1].note_columns[1].note_value)
         assert.are.equal(PR.NOTE_EMPTY, lines[2].note_columns[1].note_value)
@@ -510,10 +512,59 @@ describe("resolve_phrase_iter with scale options", function()
         -- C+2=D (ok), F#+2=G# (not in C Major, snap to G)
         local phrase = make_phrase({ { n("C-4"), n("F#4") } })
         local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
-            { song_lpb = 4, scale_key = "C", scale_mode = "Natural Major" })
+                { song_lpb = 4, scale_key = "C", scale_mode = "Natural Major" })
         local lines = collect(iter)
         assert.are.equal(n("D-4"), lines[1].note_columns[1].note_value)
         assert.are.equal(n("G-4"), lines[1].note_columns[2].note_value)
+    end)
+
+    it("D Dorian: all 12 chromatic notes produce only white keys", function()
+        -- D Dorian = D E F G A B C (the white keys)
+        -- Phrase: all 12 chromatic notes C-4..B-4, base=C-4
+        -- Trigger = D-4 → transpose = +2
+        --
+        -- Note   +2    Rel to D  In Dorian?  Snap        Result
+        -- C-4    D-4   0         yes                     D-4
+        -- C#4    D#4   1         no          ↓ D(0)      D-4
+        -- D-4    E-4   2         yes                     E-4
+        -- D#4    F-4   3         yes                     F-4
+        -- E-4    F#4   4         no          ↓ F(3)      F-4
+        -- F-4    G-4   5         yes                     G-4
+        -- F#4    G#4   6         no          ↓ G(5)      G-4
+        -- G-4    A-4   7         yes                     A-4
+        -- G#4    A#4   8         no          ↓ A(7)      A-4
+        -- A-4    B-4   9         yes                     B-4
+        -- A#4    C-5   10        yes                     C-5
+        -- B-4    C#5   11        no          ↓ C(10)     C-5
+
+        local rows = {}
+        for i = 0, 11 do
+            rows[i + 1] = { 48 + i }  -- C-4 through B-4
+        end
+        local phrase = make_phrase(rows, { base_note = n("C-4") })
+        local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
+                { song_lpb = 4, scale_key = "D", scale_mode = "Dorian" })
+        local lines = collect(iter)
+
+        local expected = {
+            n("D-4"), -- C  +2 = D
+            n("D-4"), -- C# +2 = D# → D
+            n("E-4"), -- D  +2 = E
+            n("F-4"), -- D# +2 = F
+            n("F-4"), -- E  +2 = F# → F
+            n("G-4"), -- F  +2 = G
+            n("G-4"), -- F# +2 = G# → G
+            n("A-4"), -- G  +2 = A
+            n("A-4"), -- G# +2 = A# → A
+            n("B-4"), -- A  +2 = B
+            n("C-5"), -- A# +2 = C
+            n("C-5"), -- B  +2 = C# → C
+        }
+
+        assert.are.equal(12, #lines)
+        for i, line in ipairs(lines) do
+            assert.are.equal(expected[i], line.note_columns[1].note_value)
+        end
     end)
 end)
 
@@ -539,7 +590,7 @@ describe("resolve_pattern_phrase with trigger_options", function()
         }
         local line = make_pattern_line_fx(n("D-4"), 0, 1)
         local notes = collect_notes(
-            PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
+                PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
         )
         assert.are.same({ n("D-4"), n("D-4"), n("E-4") }, notes)
     end)
@@ -558,7 +609,7 @@ describe("resolve_pattern_phrase with trigger_options", function()
         }
         local line = make_pattern_line_fx(n("D-4"), 0, 1)
         local notes = collect_notes(
-            PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
+                PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
         )
         -- transpose +2: C→D, C#→D#
         assert.are.same({ n("D-4"), n("D#4") }, notes)
@@ -575,7 +626,7 @@ describe("resolve_pattern_phrase with trigger_options", function()
         }
         local line = make_pattern_line_fx(n("D-4"), 0, 1)
         local notes = collect_notes(
-            PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
+                PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
         )
         assert.are.same({ n("D-4"), n("D#4") }, notes)
     end)
@@ -595,11 +646,11 @@ describe("resolve_pattern_phrase with trigger_options", function()
         }
         local line = make_pattern_line_fx(n("D-4"), 0, 1)
         local notes = collect_notes(
-            PR.resolve_pattern_phrase(line, instruments, {
-                song_lpb = 4,
-                scale_mode = "Natural Major",
-                scale_key = "C",
-            })
+                PR.resolve_pattern_phrase(line, instruments, {
+                    song_lpb = 4,
+                    scale_mode = "Natural Major",
+                    scale_key = "C",
+                })
         )
         -- With C major: C+2=D(ok), C#+2=D#(snap to D in C major)
         assert.are.same({ n("D-4"), n("D-4") }, notes)
@@ -622,7 +673,7 @@ describe("resolve_pattern_phrase with trigger_options", function()
         }
         local line = make_pattern_line_fx(n("D-4"), 0, 1)
         local notes = collect_notes(
-            PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
+                PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
         )
         -- C+2=D (in C minor), E+2=F#(66), relative 6, not in minor
         -- snap down 1: F(65), relative 5, IS in minor
@@ -644,13 +695,13 @@ describe("D Dorian: all output notes are white keys", function()
     -- produce only white-key output thanks to scale snapping.
 
     local white_keys = {
-        [0] = true,   -- C
-        [2] = true,   -- D
-        [4] = true,   -- E
-        [5] = true,   -- F
-        [7] = true,   -- G
-        [9] = true,   -- A
-        [11] = true,  -- B
+        [0] = true, -- C
+        [2] = true, -- D
+        [4] = true, -- E
+        [5] = true, -- F
+        [7] = true, -- G
+        [9] = true, -- A
+        [11] = true, -- B
     }
 
     local function is_white_key(midi_note)
@@ -665,15 +716,15 @@ describe("D Dorian: all output notes are white keys", function()
         end
         local phrase = make_phrase(rows, { base_note = n("D-4") })
         local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
-            { song_lpb = 4, scale_key = "D", scale_mode = "Dorian" })
+                { song_lpb = 4, scale_key = "D", scale_mode = "Dorian" })
         local lines = collect(iter)
 
         assert.are.equal(12, #lines)
         for i, line in ipairs(lines) do
             local nv = line.note_columns[1].note_value
             assert(is_white_key(nv),
-                string.format("line %d: note %d (%s) is not a white key",
-                    i, nv, PR.note_to_string(nv)))
+                    string.format("line %d: note %d (%s) is not a white key",
+                            i, nv, PR.note_to_string(nv)))
         end
     end)
 
@@ -686,15 +737,15 @@ describe("D Dorian: all output notes are white keys", function()
         end
         local phrase = make_phrase(rows, { base_note = n("C-4") })
         local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
-            { song_lpb = 4, scale_key = "D", scale_mode = "Dorian" })
+                { song_lpb = 4, scale_key = "D", scale_mode = "Dorian" })
         local lines = collect(iter)
 
         assert.are.equal(12, #lines)
         for i, line in ipairs(lines) do
             local nv = line.note_columns[1].note_value
             assert(is_white_key(nv),
-                string.format("line %d: note %d (%s) is not a white key",
-                    i, nv, PR.note_to_string(nv)))
+                    string.format("line %d: note %d (%s) is not a white key",
+                            i, nv, PR.note_to_string(nv)))
         end
     end)
 
@@ -719,30 +770,30 @@ describe("D Dorian: all output notes are white keys", function()
         end
         local phrase = make_phrase(rows, { base_note = n("C-4") })
         local iter = PR.resolve_phrase_iter(n("D-4"), phrase,
-            { song_lpb = 4, scale_key = "D", scale_mode = "Dorian" })
+                { song_lpb = 4, scale_key = "D", scale_mode = "Dorian" })
         local lines = collect(iter)
 
         local expected = {
-            n("D-4"),  -- C  +2 = D
-            n("D-4"),  -- C# +2 = D# → D
-            n("E-4"),  -- D  +2 = E
-            n("F-4"),  -- D# +2 = F
-            n("F-4"),  -- E  +2 = F# → F
-            n("G-4"),  -- F  +2 = G
-            n("G-4"),  -- F# +2 = G# → G
-            n("A-4"),  -- G  +2 = A
-            n("A-4"),  -- G# +2 = A# → A
-            n("B-4"),  -- A  +2 = B
-            n("C-5"),  -- A# +2 = C
-            n("C-5"),  -- B  +2 = C# → C
+            n("D-4"), -- C  +2 = D
+            n("D-4"), -- C# +2 = D# → D
+            n("E-4"), -- D  +2 = E
+            n("F-4"), -- D# +2 = F
+            n("F-4"), -- E  +2 = F# → F
+            n("G-4"), -- F  +2 = G
+            n("G-4"), -- F# +2 = G# → G
+            n("A-4"), -- G  +2 = A
+            n("A-4"), -- G# +2 = A# → A
+            n("B-4"), -- A  +2 = B
+            n("C-5"), -- A# +2 = C
+            n("C-5"), -- B  +2 = C# → C
         }
 
         assert.are.equal(#expected, #lines)
         for i, line in ipairs(lines) do
             assert.are.equal(expected[i], line.note_columns[1].note_value,
-                string.format("line %d: expected %s, got %s",
-                    i, PR.note_to_string(expected[i]),
-                    PR.note_to_string(line.note_columns[1].note_value)))
+                    string.format("line %d: expected %s, got %s",
+                            i, PR.note_to_string(expected[i]),
+                            PR.note_to_string(line.note_columns[1].note_value)))
         end
     end)
 
@@ -755,7 +806,7 @@ describe("D Dorian: all output notes are white keys", function()
         local instruments = {
             {
                 phrases = {
-                    [1] = make_phrase(rows),  -- base_note = C-4 (default)
+                    [1] = make_phrase(rows), -- base_note = C-4 (default)
                 },
                 trigger_options = {
                     scale_mode = "Dorian",
@@ -765,14 +816,14 @@ describe("D Dorian: all output notes are white keys", function()
         }
         local line = make_pattern_line_fx(n("D-4"), 0, 1)
         local notes = collect_notes(
-            PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
+                PR.resolve_pattern_phrase(line, instruments, { song_lpb = 4 })
         )
 
         assert.are.equal(12, #notes)
         for i, nv in ipairs(notes) do
             assert(is_white_key(nv),
-                string.format("note %d: %d (%s) is not a white key",
-                    i, nv, PR.note_to_string(nv)))
+                    string.format("note %d: %d (%s) is not a white key",
+                            i, nv, PR.note_to_string(nv)))
         end
     end)
 end)
