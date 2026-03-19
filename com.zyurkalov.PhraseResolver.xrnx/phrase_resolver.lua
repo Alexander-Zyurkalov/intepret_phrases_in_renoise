@@ -38,8 +38,8 @@
 --- @alias PatternLineIterator fun(): PatternLineTable?
 --- @alias ParsedPatternLine { note_value: number?, instrument_value: number?, volume_value: number?, panning_value: number?, delay_value: number?, effect_number_value: number?, effect_amount_value: number?, phrase_index: number? }
 --- @alias PhraseData { lines: PatternLineTable[], number_of_lines: number, base_note: number?, key_tracking: number?, lpb: number?, looping: boolean?, loop_start: number?, loop_end: number? }
---- @alias InstrumentData { phrases: PhraseData[]? }
---- @alias ResolveOptions { col_index: number?, song_lpb: number? }
+--- @alias InstrumentData { phrases: PhraseData[]?, trigger_options: { scale_mode: string?, scale_key: string? }? }
+--- @alias ResolveOptions { col_index: number?, song_lpb: number?, scale_key: string?, scale_mode: string? }
 
 --- @type PhraseResolverModule
 local M = {}
@@ -63,6 +63,104 @@ M.KEY_TRACKING_TRANSPOSE = 2
 M.KEY_TRACKING_OFFSET = 3
 
 M.ZXX_EFFECT_STRING = "0Z"
+
+---------------------------------------------------------------------------
+-- Scale definitions
+---------------------------------------------------------------------------
+
+--- Map of scale name → set of semitone offsets (0–11) from the root.
+--- Matches the built-in scales available via
+--- renoise.InstrumentTriggerOptions.available_scales.
+--- @type table<string, table<number, boolean>>
+M.SCALE_DEGREES = {
+    ["None"]              = nil,  -- no constraint
+    ["Natural Major"]     = {[0]=true,[2]=true,[4]=true,[5]=true,[7]=true,[9]=true,[11]=true},
+    ["Natural Minor"]     = {[0]=true,[2]=true,[3]=true,[5]=true,[7]=true,[8]=true,[10]=true},
+    ["Pentatonic"]        = {[0]=true,[2]=true,[4]=true,[7]=true,[9]=true},
+    ["Blues"]             = {[0]=true,[3]=true,[5]=true,[6]=true,[7]=true,[10]=true},
+    ["Dorian"]            = {[0]=true,[2]=true,[3]=true,[5]=true,[7]=true,[9]=true,[10]=true},
+    ["Mixolydian"]        = {[0]=true,[2]=true,[4]=true,[5]=true,[7]=true,[9]=true,[10]=true},
+    ["Phrygian"]          = {[0]=true,[1]=true,[3]=true,[5]=true,[7]=true,[8]=true,[10]=true},
+    ["Lydian"]            = {[0]=true,[2]=true,[4]=true,[6]=true,[7]=true,[9]=true,[11]=true},
+    ["Locrian"]           = {[0]=true,[1]=true,[3]=true,[5]=true,[6]=true,[8]=true,[10]=true},
+    ["Harmonic Minor"]    = {[0]=true,[2]=true,[3]=true,[5]=true,[7]=true,[8]=true,[11]=true},
+    ["Melodic Minor"]     = {[0]=true,[2]=true,[3]=true,[5]=true,[7]=true,[9]=true,[11]=true},
+    ["Whole Tone"]        = {[0]=true,[2]=true,[4]=true,[6]=true,[8]=true,[10]=true},
+    ["Minor Pentatonic"]  = {[0]=true,[3]=true,[5]=true,[7]=true,[10]=true},
+    ["Hungarian Minor"]   = {[0]=true,[2]=true,[3]=true,[6]=true,[7]=true,[8]=true,[11]=true},
+    ["Ukrainian Dorian"]  = {[0]=true,[2]=true,[3]=true,[6]=true,[7]=true,[9]=true,[10]=true},
+    ["Romanian Minor"]    = {[0]=true,[2]=true,[3]=true,[6]=true,[7]=true,[9]=true,[10]=true},
+    ["Spanish"]           = {[0]=true,[1]=true,[3]=true,[4]=true,[5]=true,[7]=true,[8]=true,[10]=true},
+    ["Gypsy"]             = {[0]=true,[2]=true,[3]=true,[6]=true,[7]=true,[8]=true,[11]=true},
+    ["Arabian"]           = {[0]=true,[2]=true,[4]=true,[5]=true,[6]=true,[8]=true,[10]=true},
+    ["Egyptian"]          = {[0]=true,[2]=true,[5]=true,[7]=true,[10]=true},
+    ["Japanese (In Sen)"] = {[0]=true,[1]=true,[5]=true,[7]=true,[10]=true},
+    ["Japanese (Hirajoshi)"] = {[0]=true,[2]=true,[3]=true,[7]=true,[8]=true},
+    ["Chromatic"]         = {[0]=true,[1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true,[9]=true,[10]=true,[11]=true},
+}
+
+--- Map scale key name → semitone offset from C.
+--- @type table<string, number>
+M.SCALE_KEY_OFFSETS = {
+    ["C"]  = 0,  ["C#"] = 1,  ["D"]  = 2,  ["D#"] = 3,
+    ["E"]  = 4,  ["F"]  = 5,  ["F#"] = 6,  ["G"]  = 7,
+    ["G#"] = 8,  ["A"]  = 9,  ["A#"] = 10, ["B"]  = 11,
+    -- Alternative flat names (just in case)
+    ["Db"] = 1,  ["Eb"] = 3,  ["Fb"] = 4,  ["Gb"] = 6,
+    ["Ab"] = 8,  ["Bb"] = 10,
+}
+
+---------------------------------------------------------------------------
+-- Scale snapping
+---------------------------------------------------------------------------
+
+--- Snap a MIDI note value to the nearest note that belongs to the given
+--- scale.  Searches outward (down first, then up) by up to 6 semitones.
+---
+--- @param  note_value   number              MIDI note 0-119
+--- @param  scale_key    string              Root key, e.g. "C", "D#"
+--- @param  scale_mode   string              Scale name, e.g. "Natural Major"
+--- @return number                           Snapped MIDI note (clamped 0-119)
+function M._snap_to_scale(note_value, scale_key, scale_mode)
+    if not scale_mode or scale_mode == "None" then
+        return note_value
+    end
+
+    local degrees = M.SCALE_DEGREES[scale_mode]
+    if not degrees then
+        -- Unknown scale → pass through unchanged
+        return note_value
+    end
+
+    local key_offset = M.SCALE_KEY_OFFSETS[scale_key] or 0
+
+    -- Check if note is already in the scale
+    local relative = (note_value - key_offset) % 12
+    if degrees[relative] then
+        return note_value
+    end
+
+    -- Search outward: prefer going down, then up
+    for offset = 1, 6 do
+        local below = note_value - offset
+        if below >= 0 then
+            local rel_below = (below - key_offset) % 12
+            if degrees[rel_below] then
+                return below
+            end
+        end
+        local above = note_value + offset
+        if above <= 119 then
+            local rel_above = (above - key_offset) % 12
+            if degrees[rel_above] then
+                return above
+            end
+        end
+    end
+
+    -- Fallback (should not happen with any real scale)
+    return note_value
+end
 
 ---------------------------------------------------------------------------
 -- Zxx detection
@@ -160,15 +258,21 @@ end
 -- Internal: transpose a single note value
 ---------------------------------------------------------------------------
 
---- @param note_value number
---- @param semitones number
+--- @param note_value  number
+--- @param semitones   number
+--- @param scale_key   string?  Root key for scale snapping (e.g. "C")
+--- @param scale_mode  string?  Scale name (e.g. "Natural Major"), nil or "None" to skip
 --- @return number
-function M._transpose_note(note_value, semitones)
+function M._transpose_note(note_value, semitones, scale_key, scale_mode)
     if note_value == M.NOTE_OFF or note_value == M.NOTE_EMPTY then
         return note_value
     end
     local result = note_value + semitones
-    return math.max(0, math.min(119, result))
+    result = math.max(0, math.min(119, result))
+    if scale_mode and scale_mode ~= "None" and scale_key then
+        result = M._snap_to_scale(result, scale_key, scale_mode)
+    end
+    return result
 end
 
 ---------------------------------------------------------------------------
@@ -210,6 +314,9 @@ function M.resolve_phrase_iter(trigger_note, phrase, options)
         transpose = trigger_note - base_note
     end
 
+    local scale_key = options.scale_key
+    local scale_mode = options.scale_mode
+
     local beat_per_phrase_line = 1.0 / phrase_lpb
     local ph_idx = 1
     local out_idx = 0
@@ -240,7 +347,7 @@ function M.resolve_phrase_iter(trigger_note, phrase, options)
                 nv = M.NOTE_EMPTY
             end
             res_cols[col_i] = {
-                note_value = M._transpose_note(nv, transpose),
+                note_value = M._transpose_note(nv, transpose, scale_key, scale_mode),
                 instrument_value = col.instrument_value,
                 volume_value = col.volume_value,
                 panning_value = col.panning_value,
@@ -528,6 +635,16 @@ function M.resolve_pattern_phrase(pattern_line, instruments, options)
         return M._passthrough_iter(parsed, song_lpb)
     end
 
+    -- Inject instrument scale parameters into options if present
+    if instrument.trigger_options then
+        local sm = instrument.trigger_options.scale_mode
+        local sk = instrument.trigger_options.scale_key
+        if sm and sm ~= "None" then
+            options.scale_mode = options.scale_mode or sm
+            options.scale_key  = options.scale_key  or sk
+        end
+    end
+
     local phrase_iter = M.resolve_phrase_iter(parsed.note_value, phrase, options)
     return M.pattern_line_iter(phrase_iter, song_lpb)
 end
@@ -541,6 +658,11 @@ end
 --- base_note are provided, note values are transposed by the
 --- difference (trigger_note − base_note), matching Renoise's
 --- key-tracking transpose behaviour.
+---
+--- NOTE: Scale snapping is NOT applied here.  This function converts
+--- notes from the resolved (_res) track back into phrase space by
+--- reversing the transpose.  Scales are a forward-path concern only
+--- (applied during resolve_phrase_iter when notes are played back).
 ---
 --- @param  pattern_line  PatternLineTable  PatternLine-shaped table
 --- @param  trigger_note  number?           MIDI note that triggered the phrase (0-119)

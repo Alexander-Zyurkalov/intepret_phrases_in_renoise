@@ -651,7 +651,7 @@ local function interpret_line_from_resolved(pos)
         total_lines = total_lines + song.patterns[pattern_num].number_of_lines
     end
     total_lines = total_lines + pos.line - owning_line + 1
-    -- TODO: transpose with scales
+
     local phrase_index = find_active_phrase_index(
             resource_track, seq_pos, pos.line
     )
@@ -675,9 +675,10 @@ local function interpret_line_from_resolved(pos)
     song.selected_instrument_index = inst_idx
     song.selected_phrase_index = phrase_index
 
+    local instrument = song.instruments[inst_idx]
 
     --- @type renoise.InstrumentPhrase
-    local phrase = song.instruments[inst_idx].phrases[phrase_index]
+    local phrase = instrument.phrases[phrase_index]
     if not phrase then
         return
     end
